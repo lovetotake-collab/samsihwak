@@ -1,0 +1,2413 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>삼시확 매매 v8 (매수/매도 자동전환)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+        input[type="text"], input[type="number"], select {
+            border: 2px solid #e5e7eb;
+            padding: 10px;
+            border-radius: 8px;
+            width: 100%;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+        select {
+            cursor: pointer;
+            background-color: white;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        .input-gray { background: #f3f4f6; border-color: #9ca3af; }
+        .input-chart { background: #e0e7ff; border-color: #818cf8; }
+        .input-high { background: #fee2e2; border-color: #fca5a5; }
+        .input-low { background: #dbeafe; border-color: #93c5fd; }
+        .input-bounce { background: #d1fae5; border-color: #6ee7b7; }
+        .input-date { background: #fef3c7; border-color: #fbbf24; }
+        
+        .btn-calculate {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 14px 28px;
+            border-radius: 10px;
+            border: none;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 6px rgba(102, 126, 234, 0.3);
+        }
+        .btn-calculate:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(102, 126, 234, 0.4);
+        }
+        .btn-reset {
+            background: #6b7280;
+            color: white;
+            padding: 14px 28px;
+            border-radius: 10px;
+            border: none;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .btn-reset:hover {
+            background: #4b5563;
+            transform: translateY(-2px);
+        }
+        
+        .btn-google {
+            background: #4285f4;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: none;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-google:hover {
+            background: #357ae8;
+        }
+        .btn-google:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        
+        .btn-backup {
+            background: #10b981;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: none;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-backup:hover:not(:disabled) {
+            background: #059669;
+        }
+        .btn-backup:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+        
+        .btn-load {
+            background: #f59e0b;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: none;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-load:hover:not(:disabled) {
+            background: #d97706;
+        }
+        .btn-load:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+        
+        .sync-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .sync-status.connected {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        .sync-status.disconnected {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        .sync-status.syncing {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .buy-box {
+            padding: 16px;
+            border-radius: 12px;
+            margin-bottom: 12px;
+            border: 2px solid;
+            transition: all 0.2s;
+        }
+        .buy-box:hover {
+            transform: translateX(4px);
+        }
+        
+        /* 실시간 시세 스타일 */
+        .price-up { color: #dc2626; font-weight: bold; }
+        .price-down { color: #2563eb; font-weight: bold; }
+        .price-flat { color: #1f2937; font-weight: bold; }
+        
+        /* 매수타점 도달 표시 (취소선 스타일) */
+        .price-reached {
+            color: #dc2626;
+            text-decoration: line-through;
+            font-weight: bold;
+        }
+        
+        /* 근접 (현재가 > 매수타점): 녹색 박스 */
+        .proximity-box {
+            background: #bbf7d0 !important;
+            border: 2px solid #22c55e !important;
+            box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+            animation: pulse-green 1.5s infinite;
+            border-radius: 6px;
+            padding: 4px 8px;
+            display: inline-block;
+        }
+        
+        @keyframes pulse-green {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.8; }
+        }
+        
+        /* 도달 (현재가 ≈ 매수타점): 주황색 박스 */
+        .proximity-box-equal {
+            background: #fed7aa !important;
+            border: 2px solid #f97316 !important;
+            box-shadow: 0 0 10px rgba(249, 115, 22, 0.5);
+            animation: pulse-orange 1.5s infinite;
+            border-radius: 6px;
+            padding: 4px 8px;
+            display: inline-block;
+        }
+        
+        @keyframes pulse-orange {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.8; }
+        }
+        
+        /* 도달 이하 (현재가 < 매수타점): 주황색 실선 박스 */
+        .proximity-box-below {
+            background: white !important;
+            border: 2px solid #f97316 !important;
+            color: #f97316 !important;
+            font-weight: bold;
+            border-radius: 6px;
+            padding: 4px 8px;
+            display: inline-block;
+        }
+        
+        /* 매도타점 근접 (현재가 < 매도타점, 1% 이내): 파란색 박스 */
+        .sell-proximity-box {
+            background: #bfdbfe !important;
+            border: 2px solid #3b82f6 !important;
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+            animation: pulse-blue 1.5s infinite;
+            border-radius: 6px;
+            padding: 4px 8px;
+            display: inline-block;
+        }
+        
+        @keyframes pulse-blue {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.8; }
+        }
+        
+        /* 매도타점 도달 (현재가 >= 매도타점): 파란색 실선 박스 */
+        .sell-proximity-box-reached {
+            background: white !important;
+            border: 2px solid #3b82f6 !important;
+            color: #3b82f6 !important;
+            font-weight: bold;
+            border-radius: 6px;
+            padding: 4px 8px;
+            display: inline-block;
+        }
+        
+        .reached-check {
+            color: #10b981;
+            font-size: 18px;
+            font-weight: bold;
+            margin-left: 4px;
+        }
+        
+        .api-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .api-status.connected {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        .api-status.disconnected {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .realtime-price {
+            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            background: #f3f4f6;
+            margin-left: 8px;
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            line-height: 1.3;
+        }
+        
+        .realtime-price-value {
+            font-weight: bold;
+            font-size: 13px;
+        }
+        
+        .realtime-price-change {
+            font-size: 11px;
+            margin-top: 2px;
+        }
+        
+        .buy-40 { background: #fce7f3; border-color: #f472b6; }
+        .buy-50 { background: #dbeafe; border-color: #60a5fa; }
+        .buy-60 { background: #fef9c3; border-color: #facc15; }
+        .buy-70 { background: #fee2e2; border-color: #f87171; }
+        
+        .delete-btn {
+            background: #ef4444;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .delete-btn:hover {
+            background: #dc2626;
+        }
+        
+        .drag-handle {
+            cursor: move;
+            color: #9ca3af;
+            padding: 0 8px;
+            user-select: none;
+        }
+        .drag-handle:hover {
+            color: #667eea;
+        }
+        
+        /* 알림 설정 스타일 */
+        .alert-settings-btn {
+            background: #f59e0b;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.3s;
+        }
+        .alert-settings-btn:hover {
+            background: #d97706;
+        }
+        .alert-settings-btn.disabled {
+            background: #d1d5db;
+            cursor: not-allowed;
+        }
+        
+        .alert-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .alert-modal.active {
+            display: flex;
+        }
+        .alert-modal-content {
+            background: white;
+            padding: 32px;
+            border-radius: 16px;
+            max-width: 500px;
+            width: 90%;
+        }
+        
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .toggle-slider {
+            background-color: #667eea;
+        }
+        input:checked + .toggle-slider:before {
+            transform: translateX(26px);
+        }
+        
+        /* 알림 토스트 */
+        .alert-toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 16px 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            z-index: 2000;
+            animation: slideIn 0.3s ease-out;
+            max-width: 350px;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(400px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        .dragging {
+            opacity: 0.5;
+            background: #f3f4f6;
+        }
+        
+        table {
+            border-collapse: collapse;
+        }
+        table th {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        table tr:hover {
+            transform: scale(1.01);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .d-day-badge {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-left: 4px;
+        }
+        .d-day-badge.orange {
+            background: #f97316;
+            color: white;
+        }
+        .d-day-badge.warning {
+            background: #fbbf24;
+            color: #78350f;
+        }
+        .d-day-badge.danger {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .rise-rate-badge {
+            display: inline-block;
+            background: #10b981;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-left: 4px;
+        }
+        
+        .chart-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 8px;
+            font-size: 10px;
+            font-weight: bold;
+            margin-left: 4px;
+        }
+        .chart-badge.minute {
+            background: #fbbf24;
+            color: #78350f;
+        }
+        .chart-badge.daily {
+            background: #60a5fa;
+            color: #1e3a8a;
+        }
+        
+        .stock-list-section {
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        .minute-section {
+            background: #fef3c7;
+            border: 2px solid #fbbf24;
+        }
+        .daily-section {
+            background: #dbeafe;
+            border: 2px solid #60a5fa;
+        }
+        
+        @media (max-width: 768px) {
+            .grid.grid-cols-3 {
+                grid-template-columns: 1fr;
+            }
+            .grid.grid-cols-6 {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            table {
+                font-size: 10px;
+            }
+            table th, table td {
+                padding: 6px 2px !important;
+            }
+            .buy-box {
+                padding: 12px;
+            }
+            .d-day-badge {
+                font-size: 9px;
+                padding: 1px 4px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="max-w-7xl mx-auto">
+        <!-- 헤더 -->
+        <div class="card">
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <h1 class="text-4xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
+                        📊 삼시확매매 확장판 v1
+                    </h1>
+                    <p class="text-gray-600 mt-2">첫 반등을 노리는 분할매수 전략 (실시간 시세 연동)</p>
+                </div>
+                <div class="flex flex-col items-end gap-2">
+                    <!-- 키움 API 상태 -->
+                    <div class="flex items-center gap-2">
+                        <button id="alertSettingsBtn" class="alert-settings-btn" onclick="openAlertSettings()">
+                            <span>🔔</span>
+                            <span>알림 설정</span>
+                        </button>
+                        <div id="apiStatus" class="api-status disconnected">
+                            <span>●</span>
+                            <span id="apiStatusText">키움 API 연결 안됨</span>
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button id="backupBtn" class="btn-backup" onclick="manualBackup()" disabled>
+                            <span>💾</span>
+                            <span>백업</span>
+                        </button>
+                        <button id="loadBtn" class="btn-load" onclick="manualLoad()" disabled>
+                            <span>📥</span>
+                            <span>로드</span>
+                        </button>
+                        <button id="googleSignInBtn" class="btn-google" onclick="handleAuthClick()">
+                            <svg width="18" height="18" viewBox="0 0 18 18">
+                                <path fill="#fff" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18z"/>
+                                <path fill="#fff" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2a4.8 4.8 0 0 1-7.18-2.54H1.83v2.07A8 8 0 0 0 8.98 17z"/>
+                                <path fill="#fff" d="M4.5 10.52a4.8 4.8 0 0 1 0-3.04V5.41H1.83a8 8 0 0 0 0 7.18l2.67-2.07z"/>
+                                <path fill="#fff" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 0 0 1.83 5.4L4.5 7.49a4.77 4.77 0 0 1 4.48-3.3z"/>
+                            </svg>
+                            <span id="googleBtnText">구글 로그인</span>
+                        </button>
+                    </div>
+                    <div id="syncStatus" class="sync-status disconnected">
+                        <span>●</span>
+                        <span id="statusText">연결 안됨</span>
+                    </div>
+                    <div id="lastSyncTime" class="text-xs text-gray-500"></div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- 입력 영역 -->
+        <div class="card">
+            <h2 class="text-2xl font-bold mb-4 text-gray-700">📝 종목 정보 입력</h2>
+            
+            <!-- 키움 API 서버 주소 (숨김) -->
+            <input type="hidden" id="apiServerUrl" value="http://localhost:5000">
+            
+            
+            <div class="grid grid-cols-6 gap-3">
+                <div>
+                    <label class="block text-sm font-semibold mb-2 text-indigo-600">차트</label>
+                    <select id="chartType" class="input-chart">
+                        <option value="minute">분봉</option>
+                        <option value="daily">일봉</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold mb-2 text-gray-600">종목명</label>
+                    <input type="text" id="stockName" placeholder="" class="input-gray">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold mb-2 text-purple-600">종목코드</label>
+                    <input type="text" id="stockCode" placeholder="" maxlength="6" class="input-gray">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold mb-2 text-amber-600">고점일</label>
+                    <input type="text" id="highDate" placeholder="" class="input-date" maxlength="6" oninput="formatDateInput(this)">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold mb-2 text-red-600">고점 (원)</label>
+                    <input type="text" id="highPrice" placeholder="" class="input-high" oninput="formatInput(this)">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold mb-2 text-blue-600">저점 (원)</label>
+                    <input type="text" id="lowPrice" placeholder="" class="input-low" oninput="formatInput(this)">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold mb-2 text-green-600">반등저점 (원)</label>
+                    <input type="text" id="bouncePrice" placeholder="선택사항" class="input-bounce" oninput="formatInput(this)">
+                </div>
+            </div>
+            <div class="mt-4 grid grid-cols-3 gap-3">
+                <button class="btn-calculate" onclick="calculate()">
+                    ✅ 계산하기
+                </button>
+                <button class="btn-calculate" onclick="addToList()" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+                    💾 리스트에 추가
+                </button>
+                <button class="btn-reset" onclick="resetInputs()">
+                    🔄 입력 초기화
+                </button>
+            </div>
+            <div class="mt-3 text-sm text-gray-600 bg-purple-50 p-3 rounded-lg border border-purple-200">
+                💡 <strong>팁:</strong> 고점, 저점만 입력해도 매수 타점을 확인할 수 있습니다. 반등이 나오면 반등저점을 입력하여 매도 타점을 확인하세요.
+            </div>
+        </div>
+
+        <!-- 종목리스트 -->
+        <div class="card">
+            <h2 class="text-2xl font-bold mb-4 text-gray-700">📋 종목리스트</h2>
+            <p class="text-sm text-gray-500 mb-3">종목을 클릭하여 상세 타점을 확인하세요</p>
+            
+            <!-- 분봉 종목리스트 -->
+            <div class="stock-list-section minute-section">
+                <h3 class="text-lg font-bold mb-3 text-amber-900 flex items-center gap-2">
+                    ⚡ 분봉 종목리스트
+                    <span class="text-sm font-normal text-amber-700">(단기 매매)</span>
+                </h3>
+                <div id="minuteStockList"></div>
+            </div>
+            
+            <!-- 일봉 종목리스트 -->
+            <div class="stock-list-section daily-section">
+                <h3 class="text-lg font-bold mb-3 text-blue-900 flex items-center gap-2">
+                    📈 일봉 종목리스트
+                    <span class="text-sm font-normal text-blue-700">(중장기 매매)</span>
+                </h3>
+                <div id="dailyStockList"></div>
+            </div>
+        </div>
+
+        <!-- 매수/매도 타점 -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <!-- 매수 타점 -->
+            <div class="card">
+                <h2 class="text-2xl font-bold mb-4 text-gray-700">🎯 매수 타점</h2>
+                <p class="text-sm text-gray-500 mb-3">피보나치 기준 분할매수 지점</p>
+                <div id="buyPoints"></div>
+            </div>
+
+            <!-- 매도 타점 -->
+            <div class="card">
+                <h2 class="text-2xl font-bold mb-4 text-gray-700" id="sellTitle">💰 매도 타점</h2>
+                <p class="text-sm text-gray-500 mb-3">반등저점 기준 매도 지점</p>
+                <div id="sellPoints">
+                    <div class="text-center text-gray-500 py-8">
+                        반등저점을 입력하면<br>매도 타점이 표시됩니다
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 매매 전략 -->
+        <div class="card">
+            <h2 class="text-2xl font-bold mb-4 text-gray-700">💡 매매 전략</h2>
+            <div class="text-sm text-gray-700 space-y-2 bg-amber-50 p-4 rounded-lg border-2 border-amber-200">
+                <p><strong>• 매수:</strong> 고점에서 40%, 50%, 60%, 70% 하락 시점에서 분할 매수 대기</p>
+                <p><strong>• 매도:</strong> 반등저점에서 25%, 33%, 50%, 66% 상승 지점에서 분할 매도</p>
+                <p><strong>• 상황별 매도 전략:</strong></p>
+                <p class="ml-4">- 40%에서 매수: 최대 → 50% 이상 반등에서 매도</p>
+                <p class="ml-4">- 50%에서 매수: 최대 → 50% 이상 반등에서 매도</p>
+                <p class="ml-4">- 60%에서 매수: 최대 → 33% 이상 반등에서 매도</p>
+                <p class="ml-4">- 70%에서 매수: 최대 → 25% 이상 반등에서 매도</p>
+                <div class="mt-4 pt-3 border-t-2 border-amber-300">
+                    <p class="text-red-600 font-bold">⚠️ 한 번 청산되면 해당 종목의 매매는 종료합니다</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ========== 구글 드라이브 API 설정 ==========
+        const CLIENT_ID = '574140412573-n0jau2i3uph1v5p3hi9v004m44bnopq8.apps.googleusercontent.com';
+        const API_KEY = '';
+        const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
+        const SCOPES = 'https://www.googleapis.com/auth/drive.file';
+        const FILE_NAME = 'samsihwak_extended_stocks.json';
+
+        let tokenClient;
+        let gapiInited = false;
+        let gisInited = false;
+        let isSignedIn = false;
+        let driveFileId = null;
+        let tokenRefreshTimer = null;
+
+        // ========== 데이터 관리 ==========
+        let stockDatabase = [];
+        let currentSelectedIndex = -1;
+        let draggedIndex = null;
+
+        // localStorage에서 데이터 로드
+        const savedData = localStorage.getItem('samsihwakExtendedStocks');
+        if (savedData) {
+            stockDatabase = JSON.parse(savedData);
+        }
+
+        // ========== Socket.IO 실시간 연결 ==========
+        let apiServerUrl = 'http://localhost:5000';
+        let isKiwoomConnected = false;
+        let socket = null;
+        
+        // Socket.IO 연결 초기화
+        function initSocketConnection() {
+            if (socket && socket.connected) {
+                socket.disconnect();
+            }
+            
+            socket = io(apiServerUrl, {
+                transports: ['websocket', 'polling'],
+                reconnection: true,
+                reconnectionDelay: 1000,
+                reconnectionAttempts: 10
+            });
+            
+            // 연결 성공
+            socket.on('connect', () => {
+                console.log('✅ WebSocket 연결 성공');
+                isKiwoomConnected = true;
+                updateAPIStatus('connected', '키움 API 연결됨');
+                registerAllStocks();
+            });
+            
+            // 연결 끊김
+            socket.on('disconnect', () => {
+                console.log('❌ WebSocket 연결 끊김');
+                isKiwoomConnected = false;
+                updateAPIStatus('disconnected', '연결 안됨');
+            });
+            
+            // 연결 상태 수신
+            socket.on('connection_status', (data) => {
+                if (data.logged_in) {
+                    isKiwoomConnected = true;
+                    updateAPIStatus('connected', '키움 API 연결됨');
+                } else {
+                    isKiwoomConnected = false;
+                    updateAPIStatus('disconnected', '키움 API 로그인 필요');
+                }
+            });
+            
+            // 등록 성공
+            socket.on('registration_success', (data) => {
+                console.log(`🟢 ${data.message}`);
+            });
+            
+            // 에러 수신
+            socket.on('error', (data) => {
+                console.error('❌ 오류:', data.message);
+            });
+            
+            // 실시간 데이터 수신
+            socket.on('realtime_update', (data) => {
+                const { code, name, data: priceData } = data;
+                
+                const stock = stockDatabase.find(s => s.code === code);
+                if (stock) {
+                    stock.currentPrice = priceData.current_price;
+                    stock.changeRate = priceData.change_rate;
+                    stock.prevDiff = priceData.prev_diff;
+                    
+                    localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase));
+                    renderStockList();
+                }
+            });
+            
+            // 매수/매도타점 알림 수신
+            socket.on('price_alert', (data) => {
+                const { name, current_price, target_point, point_label, diff_percent, type, status, watch_mode } = data;
+                
+                const modeText = watch_mode === 'sell' ? '매도' : '매수';
+                console.log(`🔔 ${modeText}타점 알림 수신:`, data);
+                
+                // 토스트 메시지 표시
+                const targetLabel = watch_mode === 'sell' ? `매도(${point_label})` : `매수(${point_label})`;
+                const message = `
+                    <strong>${name}</strong><br>
+                    현재가: ₩${current_price.toLocaleString()}<br>
+                    ${targetLabel}: ₩${(target_point || 0).toLocaleString()}<br>
+                    차이: ${diff_percent > 0 ? '+' : ''}${diff_percent.toFixed(2)}%
+                `;
+                
+                showAlertToast(message, type, watch_mode || 'buy');
+            });
+        }
+        
+        // 모든 종목을 서버에 등록 (반등저점 유무에 따라 매수/매도타점 자동 전환)
+        function registerAllStocks() {
+            if (!socket || !socket.connected) return;
+            
+            const chartType = document.getElementById('chartType').value;
+            
+            const stocksToRegister = stockDatabase
+                .filter(s => s.code && s.chartType === chartType)
+                .map(s => {
+                    let targetPoints = [];
+                    let watchMode = 'buy';
+                    let pointLabels = [];
+                    
+                    if (s.high && s.low) {
+                        const range = s.high - s.low;
+                        
+                        // 반등저점이 있으면 매도타점 감시, 없으면 매수타점 감시
+                        if (s.bounce !== null && s.bounce !== undefined) {
+                            // 매도타점 감시 모드 - 25%, 33%, 50%, 75% 반등
+                            const bounceRange = s.high - s.bounce;
+                            watchMode = 'sell';
+                            
+                            targetPoints = [
+                                adjustSellPrice(s.bounce + (bounceRange * 0.25)).adjusted,
+                                adjustSellPrice(s.bounce + (bounceRange * 0.33)).adjusted,
+                                adjustSellPrice(s.bounce + (bounceRange * 0.50)).adjusted,
+                                adjustSellPrice(s.bounce + (bounceRange * 0.75)).adjusted
+                            ];
+                            pointLabels = ['25%반등', '33%반등', '50%반등', '75%반등'];
+                            
+                        } else {
+                            // 매수타점 감시 모드
+                            watchMode = 'buy';
+                            
+                            if (chartType === 'daily') {
+                                // 일봉: 38.2%, 45%, 50%, 55%, 60%, 65%, 70%
+                                targetPoints = [
+                                    adjustBuyPrice(s.high - (range * 0.382)).adjusted,
+                                    adjustBuyPrice(s.high - (range * 0.45)).adjusted,
+                                    adjustBuyPrice(s.high - (range * 0.50)).adjusted,
+                                    adjustBuyPrice(s.high - (range * 0.55)).adjusted,
+                                    adjustBuyPrice(s.high - (range * 0.60)).adjusted,
+                                    adjustBuyPrice(s.high - (range * 0.65)).adjusted,
+                                    adjustBuyPrice(s.high - (range * 0.70)).adjusted
+                                ];
+                                pointLabels = ['40%', '45%', '50%', '55%', '60%', '65%', '70%'];
+                            } else {
+                                // 분봉: 38.2%, 50%, 60%, 70%
+                                targetPoints = [
+                                    adjustBuyPrice(s.high - (range * 0.382)).adjusted,
+                                    adjustBuyPrice(s.high - (range * 0.50)).adjusted,
+                                    adjustBuyPrice(s.high - (range * 0.60)).adjusted,
+                                    adjustBuyPrice(s.high - (range * 0.70)).adjusted
+                                ];
+                                pointLabels = ['40%', '50%', '60%', '70%'];
+                            }
+                        }
+                    }
+                    
+                    return {
+                        code: s.code,
+                        name: s.name,
+                        watch_mode: watchMode,
+                        target_points: targetPoints,
+                        point_labels: pointLabels,
+                        high: s.high,
+                        low: s.low,
+                        bounce: s.bounce
+                    };
+                });
+            
+            if (stocksToRegister.length > 0) {
+                const sourceType = chartType === 'minute' ? 'samsihwak_분봉' : 'samsihwak_일봉';
+                
+                socket.emit('register_stocks', { 
+                    source: sourceType,
+                    stocks: stocksToRegister 
+                });
+                
+                // 매수/매도 감시 종목 수 카운트
+                const buyCount = stocksToRegister.filter(s => s.watch_mode === 'buy').length;
+                const sellCount = stocksToRegister.filter(s => s.watch_mode === 'sell').length;
+                console.log(`📡 [${sourceType}] 실시간 시세 등록: 매수감시 ${buyCount}개, 매도감시 ${sellCount}개`);
+            }
+        }
+
+        // 키움 API 서버 연결 테스트
+        async function connectKiwoomAPI() {
+            const urlInput = document.getElementById('apiServerUrl');
+            apiServerUrl = urlInput.value.trim();
+            
+            if (!apiServerUrl) {
+                alert('API 서버 주소를 입력해주세요');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${apiServerUrl}/api/login_status`);
+                const data = await response.json();
+                
+                if (data.logged_in) {
+                    alert('✅ 키움 API 연결 성공! WebSocket 실시간 연결을 시작합니다.');
+                    initSocketConnection();
+                } else {
+                    alert('❌ 키움 API에 로그인되어 있지 않습니다.\n먼저 키움 서버(python app.py)를 실행하고 로그인하세요.');
+                    updateAPIStatus('disconnected', '키움 API 로그인 필요');
+                }
+            } catch (error) {
+                console.error('API 연결 오류:', error);
+                updateAPIStatus('disconnected', '서버 연결 실패');
+                alert('❌ API 서버에 연결할 수 없습니다.\n서버 주소를 확인하거나 키움 서버가 실행 중인지 확인하세요.');
+            }
+        }
+
+        // API 상태 업데이트
+        function updateAPIStatus(status, text) {
+            const statusEl = document.getElementById('apiStatus');
+            const textEl = document.getElementById('apiStatusText');
+            
+            statusEl.className = `api-status ${status}`;
+            textEl.textContent = text;
+        }
+
+        // 매수타점 근접도 체크 (3단계: close, equal, below)
+        // chartType: 'minute' = 분봉, 'daily' = 일봉
+        function checkProximity(currentPrice, targetPrice, chartType = 'minute') {
+            if (!currentPrice || !targetPrice) return { isClose: false, isEqual: false, isBelow: false };
+            
+            const diff = currentPrice - targetPrice;
+            const percentage = (diff / targetPrice) * 100;
+            
+            // 분봉: 녹색 0.3~1.0%, 주황 0~0.3%
+            // 일봉: 녹색 1~3%, 주황 0~1%
+            let closeMax, equalMax;
+            if (chartType === 'daily') {
+                closeMax = 3.0;  // 녹색: 1~3%
+                equalMax = 1.0;  // 주황: 0~1%
+            } else {
+                closeMax = 1.0;  // 녹색: 0.3~1.0%
+                equalMax = 0.3;  // 주황: 0~0.3%
+            }
+            
+            // 도달 이하 (현재가 < 타점가)
+            if (diff < 0) {
+                return { isClose: false, isEqual: false, isBelow: true };
+            }
+            
+            // 도달 (현재가 ≈ 타점가)
+            if (percentage >= 0 && percentage <= equalMax) {
+                return { isClose: false, isEqual: true, isBelow: false };
+            }
+            
+            // 근접
+            if (percentage > equalMax && percentage <= closeMax) {
+                return { isClose: true, isEqual: false, isBelow: false };
+            }
+            
+            return { isClose: false, isEqual: false, isBelow: false };
+        }
+        
+        // 매도타점 근접도 체크 (현재가 >= 매도타점이면 도달)
+        function checkSellProximity(currentPrice, targetPrice, chartType = 'minute') {
+            if (!currentPrice || !targetPrice) return { isClose: false, isReached: false };
+            
+            const diff = currentPrice - targetPrice;
+            const percentage = (diff / targetPrice) * 100;
+            
+            // 분봉: 1% 이내 근접
+            // 일봉: 3% 이내 근접
+            const closeMax = chartType === 'daily' ? 3.0 : 1.0;
+            
+            // 도달 (현재가 >= 매도타점)
+            if (diff >= 0) {
+                return { isClose: false, isReached: true };
+            }
+            
+            // 근접 (-1% 이내, 즉 현재가가 매도타점보다 1% 미만으로 낮음)
+            if (percentage >= -closeMax && percentage < 0) {
+                return { isClose: true, isReached: false };
+            }
+            
+            return { isClose: false, isReached: false };
+        }
+
+
+        // ========== Google API 초기화 ==========
+        function gapiLoaded() {
+            gapi.load('client', initializeGapiClient);
+        }
+
+        async function initializeGapiClient() {
+            await gapi.client.init({
+                apiKey: API_KEY,
+                discoveryDocs: [DISCOVERY_DOC],
+            });
+            gapiInited = true;
+            maybeEnableButtons();
+        }
+
+        function gisLoaded() {
+            tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: CLIENT_ID,
+                scope: SCOPES,
+                callback: '',
+            });
+            gisInited = true;
+            maybeEnableButtons();
+        }
+
+        function maybeEnableButtons() {
+            if (gapiInited && gisInited) {
+                document.getElementById('googleSignInBtn').disabled = false;
+            }
+        }
+
+        // ========== 구글 로그인/로그아웃 ==========
+        function handleAuthClick() {
+            if (isSignedIn) {
+                handleSignoutClick();
+            } else {
+                tokenClient.callback = async (resp) => {
+                    if (resp.error !== undefined) {
+                        throw (resp);
+                    }
+                    
+                    localStorage.setItem('google_access_token_samsihwak', resp.access_token);
+                    if (resp.expires_in) {
+                        const expiryTime = Date.now() + (resp.expires_in * 1000);
+                        localStorage.setItem('google_token_expiry_samsihwak', expiryTime.toString());
+                        setupTokenRefresh(resp.expires_in);
+                    }
+                    
+                    isSignedIn = true;
+                    updateSyncStatus('connected', '연결됨');
+                    document.getElementById('googleBtnText').textContent = '로그아웃';
+                    document.getElementById('backupBtn').disabled = false;
+                    document.getElementById('loadBtn').disabled = false;
+                    await loadFromGoogleDrive();
+                };
+
+                if (gapi.client.getToken() === null) {
+                    tokenClient.requestAccessToken({prompt: 'consent'});
+                } else {
+                    tokenClient.requestAccessToken({prompt: ''});
+                }
+            }
+        }
+
+        function handleSignoutClick() {
+            const token = gapi.client.getToken();
+            if (token !== null) {
+                google.accounts.oauth2.revoke(token.access_token);
+                gapi.client.setToken('');
+            }
+            
+            if (tokenRefreshTimer) {
+                clearTimeout(tokenRefreshTimer);
+                tokenRefreshTimer = null;
+            }
+            
+            localStorage.removeItem('google_access_token_samsihwak');
+            localStorage.removeItem('google_token_expiry_samsihwak');
+            
+            isSignedIn = false;
+            updateSyncStatus('disconnected', '연결 안됨');
+            document.getElementById('googleBtnText').textContent = '구글 로그인';
+            document.getElementById('lastSyncTime').textContent = '';
+            document.getElementById('backupBtn').disabled = true;
+            document.getElementById('loadBtn').disabled = true;
+        }
+
+        // ========== 저장된 토큰으로 로그인 복원 ==========
+        async function restoreLoginState() {
+            const savedToken = localStorage.getItem('google_access_token_samsihwak');
+            const tokenExpiry = localStorage.getItem('google_token_expiry_samsihwak');
+            
+            if (savedToken && tokenExpiry) {
+                if (Date.now() < parseInt(tokenExpiry)) {
+                    gapi.client.setToken({
+                        access_token: savedToken
+                    });
+                    
+                    isSignedIn = true;
+                    updateSyncStatus('connected', '연결됨');
+                    document.getElementById('googleBtnText').textContent = '로그아웃';
+                    document.getElementById('backupBtn').disabled = false;
+                    document.getElementById('loadBtn').disabled = false;
+                    
+                    const remainingSeconds = Math.floor((parseInt(tokenExpiry) - Date.now()) / 1000);
+                    setupTokenRefresh(remainingSeconds);
+                    
+                    await loadFromGoogleDrive();
+                } else {
+                    localStorage.removeItem('google_access_token_samsihwak');
+                    localStorage.removeItem('google_token_expiry_samsihwak');
+                }
+            }
+        }
+
+        // ========== 토큰 자동 갱신 설정 ==========
+        function setupTokenRefresh(expiresInSeconds) {
+            if (tokenRefreshTimer) {
+                clearTimeout(tokenRefreshTimer);
+            }
+            
+            const refreshTime = Math.max((expiresInSeconds - 300) * 1000, 60 * 1000);
+            
+            tokenRefreshTimer = setTimeout(async () => {
+                if (isSignedIn && tokenClient) {
+                    try {
+                        tokenClient.callback = async (resp) => {
+                            if (resp.error === undefined) {
+                                localStorage.setItem('google_access_token_samsihwak', resp.access_token);
+                                if (resp.expires_in) {
+                                    const expiryTime = Date.now() + (resp.expires_in * 1000);
+                                    localStorage.setItem('google_token_expiry_samsihwak', expiryTime.toString());
+                                    setupTokenRefresh(resp.expires_in);
+                                }
+                                
+                                gapi.client.setToken({
+                                    access_token: resp.access_token
+                                });
+                                
+                                console.log('토큰이 자동으로 갱신되었습니다.');
+                            }
+                        };
+                        
+                        tokenClient.requestAccessToken({prompt: ''});
+                    } catch (err) {
+                        console.error('토큰 자동 갱신 실패:', err);
+                    }
+                }
+            }, refreshTime);
+        }
+
+        // ========== 동기화 상태 표시 ==========
+        function updateSyncStatus(status, text) {
+            const statusEl = document.getElementById('syncStatus');
+            const textEl = document.getElementById('statusText');
+            statusEl.className = `sync-status ${status}`;
+            textEl.textContent = text;
+        }
+
+        function updateLastSyncTime() {
+            const now = new Date();
+            const timeStr = now.toLocaleString('ko-KR');
+            document.getElementById('lastSyncTime').textContent = `마지막 동기화: ${timeStr}`;
+        }
+
+        // ========== 구글 드라이브 파일 찾기 ==========
+        async function findDriveFile() {
+            try {
+                const response = await gapi.client.drive.files.list({
+                    q: `name='${FILE_NAME}' and trashed=false`,
+                    spaces: 'drive',
+                    fields: 'files(id, name)',
+                });
+                const files = response.result.files;
+                if (files && files.length > 0) {
+                    return files[0].id;
+                }
+                return null;
+            } catch (err) {
+                console.error('파일 검색 오류:', err);
+                return null;
+            }
+        }
+
+        // ========== 구글 드라이브에서 불러오기 ==========
+        async function loadFromGoogleDrive() {
+            if (!isSignedIn) return;
+            
+            updateSyncStatus('syncing', '불러오는 중...');
+            
+            try {
+                driveFileId = await findDriveFile();
+                
+                if (driveFileId) {
+                    const response = await gapi.client.drive.files.get({
+                        fileId: driveFileId,
+                        alt: 'media',
+                    });
+                    
+                    stockDatabase = JSON.parse(response.body);
+                    localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase));
+                    renderStockList();
+                    updateSyncStatus('connected', '연결됨');
+                    updateLastSyncTime();
+                    
+                    // 실시간 시세 재등록
+                    registerAllStocks();
+                } else {
+                    updateSyncStatus('connected', '연결됨 (파일 없음)');
+                }
+            } catch (err) {
+                console.error('불러오기 오류:', err);
+                updateSyncStatus('connected', '연결됨');
+            }
+        }
+
+        // ========== 구글 드라이브에 저장 ==========
+        async function saveToGoogleDrive() {
+            if (!isSignedIn) return;
+            
+            updateSyncStatus('syncing', '저장 중...');
+            
+            try {
+                const data = JSON.stringify(stockDatabase, null, 2);
+                const blob = new Blob([data], { type: 'application/json' });
+                
+                if (driveFileId) {
+                    const metadata = {
+                        name: FILE_NAME,
+                        mimeType: 'application/json',
+                    };
+                    
+                    const form = new FormData();
+                    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+                    form.append('file', blob);
+                    
+                    await fetch(`https://www.googleapis.com/upload/drive/v3/files/${driveFileId}?uploadType=multipart`, {
+                        method: 'PATCH',
+                        headers: new Headers({ 'Authorization': 'Bearer ' + gapi.client.getToken().access_token }),
+                        body: form,
+                    });
+                } else {
+                    const metadata = {
+                        name: FILE_NAME,
+                        mimeType: 'application/json',
+                    };
+                    
+                    const form = new FormData();
+                    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+                    form.append('file', blob);
+                    
+                    const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+                        method: 'POST',
+                        headers: new Headers({ 'Authorization': 'Bearer ' + gapi.client.getToken().access_token }),
+                        body: form,
+                    });
+                    
+                    const result = await response.json();
+                    driveFileId = result.id;
+                }
+                
+                updateSyncStatus('connected', '연결됨');
+                updateLastSyncTime();
+            } catch (err) {
+                console.error('저장 오류:', err);
+                updateSyncStatus('connected', '연결됨 (저장 실패)');
+            }
+        }
+
+        // ========== 수동 백업 ==========
+        async function manualBackup() {
+            if (!isSignedIn) {
+                alert('구글 로그인이 필요합니다.');
+                return;
+            }
+            
+            if (confirm('현재 데이터를 구글 드라이브에 백업하시겠습니까?')) {
+                await saveToGoogleDrive();
+                alert('백업이 완료되었습니다!');
+            }
+        }
+
+        // ========== 수동 불러오기 ==========
+        async function manualLoad() {
+            if (!isSignedIn) {
+                alert('구글 로그인이 필요합니다.');
+                return;
+            }
+            
+            if (confirm('구글 드라이브에서 데이터를 로드하시겠습니까?\n현재 데이터는 덮어씌워집니다.')) {
+                await loadFromGoogleDrive();
+                alert('데이터를 로드했습니다!');
+            }
+        }
+
+        // ========== 호가단위 계산 ==========
+        function getTickSize(price) {
+            if (price < 2000) return 1;
+            if (price < 5000) return 5;
+            if (price < 20000) return 10;
+            if (price < 50000) return 50;
+            if (price < 200000) return 100;
+            if (price < 500000) return 500;
+            return 1000;
+        }
+
+        function adjustBuyPrice(price) {
+            const tickSize = getTickSize(price);
+            const adjusted = Math.ceil(price / tickSize) * tickSize;
+            return { original: price, adjusted: adjusted };
+        }
+
+        function adjustSellPrice(price) {
+            const tickSize = getTickSize(price);
+            const adjusted = Math.floor(price / tickSize) * tickSize;
+            return { original: price, adjusted: adjusted };
+        }
+
+        // ========== 포맷팅 함수 ==========
+        function formatDateInput(input) {
+            let value = input.value.replace(/[^0-9]/g, '');
+            if (value.length > 6) value = value.substring(0, 6);
+            input.value = value;
+        }
+
+        function formatInput(input) {
+            let value = input.value.replace(/[^0-9]/g, '');
+            if (value) {
+                input.value = parseInt(value).toLocaleString('ko-KR');
+            }
+        }
+
+        function formatPrice(price) {
+            return Math.round(price).toLocaleString('ko-KR');
+        }
+
+        function formatPriceWithOriginal(adjusted, original) {
+            const formattedAdjusted = formatPrice(adjusted);
+            if (Math.abs(adjusted - original) > 0.01) {
+                return `${formattedAdjusted}원 <span class="text-xs text-gray-500">(${formatPrice(original)}원)</span>`;
+            }
+            return `${formattedAdjusted}원`;
+        }
+
+        function getNumericValue(elementId) {
+            const value = document.getElementById(elementId).value.replace(/,/g, '');
+            return value ? parseFloat(value) : null;
+        }
+
+        // ========== 한국 공휴일 데이터 ==========
+        function getKoreanHolidays(year) {
+            const holidays = [];
+            
+            // 고정 공휴일
+            holidays.push(new Date(year, 0, 1));   // 신정
+            holidays.push(new Date(year, 2, 1));   // 삼일절
+            holidays.push(new Date(year, 4, 5));   // 어린이날
+            holidays.push(new Date(year, 5, 6));   // 현충일
+            holidays.push(new Date(year, 7, 15));  // 광복절
+            holidays.push(new Date(year, 9, 3));   // 개천절
+            holidays.push(new Date(year, 9, 9));   // 한글날
+            holidays.push(new Date(year, 11, 25)); // 크리스마스
+            
+            // 2025년 음력 공휴일
+            if (year === 2025) {
+                holidays.push(new Date(2025, 0, 28)); // 설날 전날
+                holidays.push(new Date(2025, 0, 29)); // 설날
+                holidays.push(new Date(2025, 0, 30)); // 설날 다음날
+                holidays.push(new Date(2025, 4, 5));  // 부처님오신날
+                holidays.push(new Date(2025, 9, 5));  // 추석 전날
+                holidays.push(new Date(2025, 9, 6));  // 추석
+                holidays.push(new Date(2025, 9, 7));  // 추석 다음날
+            }
+            
+            // 2026년 음력 공휴일
+            if (year === 2026) {
+                holidays.push(new Date(2026, 1, 16)); // 설날 전날
+                holidays.push(new Date(2026, 1, 17)); // 설날
+                holidays.push(new Date(2026, 1, 18)); // 설날 다음날
+                holidays.push(new Date(2026, 4, 24)); // 부처님오신날
+                holidays.push(new Date(2026, 8, 24)); // 추석 전날
+                holidays.push(new Date(2026, 8, 25)); // 추석
+                holidays.push(new Date(2026, 8, 26)); // 추석 다음날
+            }
+            
+            return holidays;
+        }
+
+        function isWeekend(date) {
+            const day = date.getDay();
+            return day === 0 || day === 6; // 일요일(0) 또는 토요일(6)
+        }
+
+        function isHoliday(date, holidays) {
+            return holidays.some(holiday => 
+                holiday.getFullYear() === date.getFullYear() &&
+                holiday.getMonth() === date.getMonth() &&
+                holiday.getDate() === date.getDate()
+            );
+        }
+
+        function isBusinessDay(date, holidays) {
+            return !isWeekend(date) && !isHoliday(date, holidays);
+        }
+
+        function calculateDDay(dateStr) {
+            if (!dateStr || dateStr.length !== 6) return { text: '', days: 0 };
+            
+            try {
+                const year = 2000 + parseInt(dateStr.substring(0, 2));
+                const month = parseInt(dateStr.substring(2, 4)) - 1;
+                const day = parseInt(dateStr.substring(4, 6));
+                
+                const targetDate = new Date(year, month, day);
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                targetDate.setHours(0, 0, 0, 0);
+                
+                // 영업일 계산
+                let businessDays = 0;
+                
+                if (today > targetDate) {
+                    // D+ 계산 (과거 날짜)
+                    let current = new Date(targetDate);
+                    current.setDate(current.getDate() + 1);
+                    
+                    while (current <= today) {
+                        const currentYear = current.getFullYear();
+                        const holidays = getKoreanHolidays(currentYear);
+                        
+                        if (isBusinessDay(current, holidays)) {
+                            businessDays++;
+                        }
+                        current.setDate(current.getDate() + 1);
+                    }
+                } else if (today < targetDate) {
+                    // D- 계산 (미래 날짜)
+                    let current = new Date(today);
+                    current.setDate(current.getDate() + 1);
+                    
+                    while (current <= targetDate) {
+                        const currentYear = current.getFullYear();
+                        const holidays = getKoreanHolidays(currentYear);
+                        
+                        if (isBusinessDay(current, holidays)) {
+                            businessDays++;
+                        }
+                        current.setDate(current.getDate() + 1);
+                    }
+                    businessDays = -businessDays;
+                }
+                
+                let text = '';
+                if (businessDays === 0) text = 'D-Day';
+                else if (businessDays > 0) text = `D+${businessDays}`;
+                else text = `D${businessDays}`;
+                
+                return { text: text, days: businessDays };
+            } catch (e) {
+                return { text: '', days: 0 };
+            }
+        }
+
+        // ========== 초기화 ==========
+        function resetInputs() {
+            document.getElementById('chartType').value = 'minute';
+            document.getElementById('stockName').value = '';
+            document.getElementById('stockCode').value = '';  // 종목코드 초기화 추가
+            document.getElementById('highDate').value = '';
+            document.getElementById('highPrice').value = '';
+            document.getElementById('lowPrice').value = '';
+            document.getElementById('bouncePrice').value = '';
+            document.getElementById('buyPoints').innerHTML = '';
+            document.getElementById('sellTitle').textContent = '💰 매도 타점';
+            document.getElementById('sellPoints').innerHTML = `
+                <div class="text-center text-gray-500 py-8">
+                    반등저점을 입력하면<br>매도 타점이 표시됩니다
+                </div>
+            `;
+            currentSelectedIndex = -1;
+            renderStockList();
+        }
+
+        // ========== 계산 ==========
+        function calculate() {
+            const high = getNumericValue('highPrice');
+            const low = getNumericValue('lowPrice');
+            const bounce = getNumericValue('bouncePrice');
+
+            if (high === null || low === null) {
+                alert('고점과 저점을 입력해주세요!');
+                return;
+            }
+
+            if (high <= low) {
+                alert('고점이 저점보다 높아야 합니다!');
+                return;
+            }
+
+            const diff = high - low;
+
+            const buy40 = adjustBuyPrice(high - (diff * 0.382));
+            const buy50 = adjustBuyPrice(high - (diff * 0.5));
+            const buy60 = adjustBuyPrice(high - (diff * 0.6));
+            const buy70 = adjustBuyPrice(high - (diff * 0.7));
+
+            document.getElementById('buyPoints').innerHTML = `
+                <div class="buy-box buy-40">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <div class="font-bold text-lg">40% 매수 <span class="text-sm text-gray-600">38.2%</span></div>
+                            <div class="text-xs text-gray-500 mt-1">≈ 매수가</div>
+                        </div>
+                        <div class="text-2xl font-bold text-pink-600">${formatPriceWithOriginal(buy40.adjusted, buy40.original)}</div>
+                    </div>
+                </div>
+                
+                <div class="buy-box buy-50">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <div class="font-bold text-lg">50% 매수</div>
+                            <div class="text-xs text-gray-500 mt-1">≈ 매수가</div>
+                        </div>
+                        <div class="text-2xl font-bold text-blue-600">${formatPriceWithOriginal(buy50.adjusted, buy50.original)}</div>
+                    </div>
+                </div>
+                
+                <div class="buy-box buy-60">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <div class="font-bold text-lg">60% 매수</div>
+                            <div class="text-xs text-gray-500 mt-1">≈ 매수가</div>
+                        </div>
+                        <div class="text-2xl font-bold text-yellow-600">${formatPriceWithOriginal(buy60.adjusted, buy60.original)}</div>
+                    </div>
+                </div>
+                
+                <div class="buy-box buy-70">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <div class="font-bold text-lg">70% 매수</div>
+                            <div class="text-xs text-gray-500 mt-1">≈ 매수가</div>
+                        </div>
+                        <div class="text-2xl font-bold text-red-600">${formatPriceWithOriginal(buy70.adjusted, buy70.original)}</div>
+                    </div>
+                </div>
+            `;
+
+            if (bounce !== null && bounce < high) {
+                const bounceRange = high - bounce;
+                
+                const sell25 = adjustSellPrice(bounce + (bounceRange * 0.25));
+                const sell33 = adjustSellPrice(bounce + (bounceRange * 0.33));
+                const sell50 = adjustSellPrice(bounce + (bounceRange * 0.50));
+                const sell66 = adjustSellPrice(bounce + (bounceRange * 0.66));
+                const sell75 = adjustSellPrice(bounce + (bounceRange * 0.75));
+
+                const riseRate4050 = (((buy40.adjusted - buy50.adjusted) / buy50.adjusted) * 100).toFixed(2);
+                
+                document.getElementById('sellTitle').innerHTML = `💰 매도 타점 <span class="text-base font-normal text-gray-600">(40-50 상승률: ${riseRate4050}%)</span>`;
+
+                document.getElementById('sellPoints').innerHTML = `
+                    <div class="space-y-3">
+                        <div class="bg-green-50 p-4 rounded-lg border-2 border-green-300">
+                            <div class="flex justify-between items-center">
+                                <div class="font-bold">25% 반등</div>
+                                <div class="text-xl font-bold text-green-600">${formatPriceWithOriginal(sell25.adjusted, sell25.original)}</div>
+                            </div>
+                        </div>
+                        <div class="bg-green-50 p-4 rounded-lg border-2 border-green-300">
+                            <div class="flex justify-between items-center">
+                                <div class="font-bold">33% 반등</div>
+                                <div class="text-xl font-bold text-green-600">${formatPriceWithOriginal(sell33.adjusted, sell33.original)}</div>
+                            </div>
+                        </div>
+                        <div class="bg-green-50 p-4 rounded-lg border-2 border-green-300">
+                            <div class="flex justify-between items-center">
+                                <div class="font-bold">50% 반등</div>
+                                <div class="text-xl font-bold text-green-600">${formatPriceWithOriginal(sell50.adjusted, sell50.original)}</div>
+                            </div>
+                        </div>
+                        <div class="bg-green-50 p-4 rounded-lg border-2 border-green-300">
+                            <div class="flex justify-between items-center">
+                                <div class="font-bold">66% 반등</div>
+                                <div class="text-xl font-bold text-green-600">${formatPriceWithOriginal(sell66.adjusted, sell66.original)}</div>
+                            </div>
+                        </div>
+                        <div class="bg-green-50 p-4 rounded-lg border-2 border-green-300">
+                            <div class="flex justify-between items-center">
+                                <div class="font-bold">75% 반등</div>
+                                <div class="text-xl font-bold text-green-600">${formatPriceWithOriginal(sell75.adjusted, sell75.original)}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                document.getElementById('sellTitle').textContent = '💰 매도 타점';
+                document.getElementById('sellPoints').innerHTML = `
+                    <div class="text-center text-gray-500 py-8">
+                        반등저점을 입력하면<br>매도 타점이 표시됩니다
+                    </div>
+                `;
+            }
+        }
+
+        // ========== 리스트 관리 ==========
+        function addToList() {
+            const chartType = document.getElementById('chartType').value;
+            const stockName = document.getElementById('stockName').value;
+            const stockCode = document.getElementById('stockCode').value;
+            const highDate = document.getElementById('highDate').value;
+            const high = getNumericValue('highPrice');
+            const low = getNumericValue('lowPrice');
+            const bounce = getNumericValue('bouncePrice');
+
+            if (!stockName || high === null || low === null) {
+                alert('종목명, 고점, 저점을 입력해주세요!');
+                return;
+            }
+
+            const stockData = {
+                chartType: chartType,
+                name: stockName,
+                code: stockCode || '',
+                highDate: highDate || '',
+                high: high,
+                low: low,
+                bounce: bounce,
+                timestamp: new Date().toISOString(),
+                currentPrice: null,
+                changeRate: null,
+                // 매수타점 도달 이력 (한번 터치하면 영구 저장)
+                reachedHistory: {
+                    reached40: false,
+                    reached45: false,
+                    reached50: false,
+                    reached55: false,
+                    reached60: false,
+                    reached65: false,
+                    reached70: false,
+                    // 매도타점 도달 이력
+                    reachedSell25: false,
+                    reachedSell33: false,
+                    reachedSell50: false,
+                    reachedSell75: false
+                }
+            };
+
+            const existingIndex = stockDatabase.findIndex(stock => 
+                stock.name === stockName && stock.chartType === chartType
+            );
+            
+            if (existingIndex !== -1) {
+                stockDatabase[existingIndex] = stockData;
+                const chartTypeText = chartType === 'minute' ? '분봉' : '일봉';
+                alert(`"${stockName}" (${chartTypeText}) 종목 정보가 업데이트되었습니다!`);
+            } else {
+                stockDatabase.unshift(stockData);
+                const chartTypeText = chartType === 'minute' ? '분봉' : '일봉';
+                alert(`"${stockName}" (${chartTypeText}) 종목이 리스트에 추가되었습니다!`);
+            }
+            
+            localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase));
+            renderStockList();
+            
+            // 실시간 시세 재등록
+            registerAllStocks();
+        }
+
+        function renderStockList() {
+            const minuteStocks = stockDatabase.filter(stock => stock.chartType === 'minute');
+            const dailyStocks = stockDatabase.filter(stock => stock.chartType === 'daily');
+            
+            renderStockTable('minuteStockList', minuteStocks, 'minute');
+            renderStockTable('dailyStockList', dailyStocks, 'daily');
+        }
+
+        function renderStockTable(elementId, stocks, chartType) {
+            const listElement = document.getElementById(elementId);
+            
+            if (stocks.length === 0) {
+                listElement.innerHTML = `
+                    <div class="text-center text-gray-400 py-8">
+                        아직 저장된 종목이 없습니다.<br>
+                        "${chartType === 'minute' ? '분봉' : '일봉'}" 차트를 선택하고 "리스트에 추가" 버튼을 눌러 종목을 저장하세요.
+                    </div>
+                `;
+                return;
+            }
+
+            listElement.innerHTML = `
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs">
+                        <thead>
+                            <tr class="bg-gradient-to-r ${chartType === 'minute' ? 'from-amber-100 to-yellow-100 border-amber-300' : 'from-blue-100 to-cyan-100 border-blue-300'} border-b-2">
+                                <th class="p-2 text-left font-bold whitespace-nowrap">⋮</th>
+                                <th class="p-2 text-left font-bold whitespace-nowrap">종목명</th>
+                                <th class="p-2 text-center font-bold text-pink-600 whitespace-nowrap">40%</th>
+                                ${chartType === 'daily' ? '<th class="p-2 text-center font-bold text-gray-900 whitespace-nowrap">45%</th>' : ''}
+                                <th class="p-2 text-center font-bold text-blue-600 whitespace-nowrap">50%</th>
+                                ${chartType === 'daily' ? '<th class="p-2 text-center font-bold text-gray-900 whitespace-nowrap">55%</th>' : ''}
+                                <th class="p-2 text-center font-bold text-yellow-600 whitespace-nowrap">60%</th>
+                                ${chartType === 'daily' ? '<th class="p-2 text-center font-bold text-gray-900 whitespace-nowrap">65%</th>' : ''}
+                                <th class="p-2 text-center font-bold text-red-600 whitespace-nowrap">70%</th>
+                                <th class="p-2 text-center font-bold text-blue-500 whitespace-nowrap">25%↑</th>
+                                <th class="p-2 text-center font-bold text-blue-500 whitespace-nowrap">33%↑</th>
+                                <th class="p-2 text-center font-bold text-blue-500 whitespace-nowrap">50%↑</th>
+                                <th class="p-2 text-center font-bold text-blue-500 whitespace-nowrap">75%↑</th>
+                                <th class="p-2 text-center whitespace-nowrap">관리</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${stocks.map((stock) => {
+                                const globalIndex = stockDatabase.findIndex(s => s.name === stock.name && s.timestamp === stock.timestamp);
+                                const selected = globalIndex === currentSelectedIndex ? 'bg-purple-100' : '';
+                                
+                                const diff = stock.high - stock.low;
+                                const buy40 = adjustBuyPrice(stock.high - (diff * 0.382));
+                                const buy45 = adjustBuyPrice(stock.high - (diff * 0.45));
+                                const buy50 = adjustBuyPrice(stock.high - (diff * 0.5));
+                                const buy55 = adjustBuyPrice(stock.high - (diff * 0.55));
+                                const buy60 = adjustBuyPrice(stock.high - (diff * 0.6));
+                                const buy65 = adjustBuyPrice(stock.high - (diff * 0.65));
+                                const buy70 = adjustBuyPrice(stock.high - (diff * 0.7));
+                                
+                                let sell25 = '-', sell33 = '-', sell50 = '-', sell75 = '-';
+                                let sell25Price = null, sell33Price = null, sell50Price = null, sell75Price = null;
+                                
+                                if (stock.bounce !== null && stock.bounce !== undefined) {
+                                    const bounceRange = stock.high - stock.bounce;
+                                    sell25Price = adjustSellPrice(stock.bounce + (bounceRange * 0.25)).adjusted;
+                                    sell33Price = adjustSellPrice(stock.bounce + (bounceRange * 0.33)).adjusted;
+                                    sell50Price = adjustSellPrice(stock.bounce + (bounceRange * 0.50)).adjusted;
+                                    sell75Price = adjustSellPrice(stock.bounce + (bounceRange * 0.75)).adjusted;
+                                    
+                                    // 매도타점 근접도 체크
+                                    const sellProximity25 = checkSellProximity(stock.currentPrice, sell25Price, chartType);
+                                    const sellProximity33 = checkSellProximity(stock.currentPrice, sell33Price, chartType);
+                                    const sellProximity50 = checkSellProximity(stock.currentPrice, sell50Price, chartType);
+                                    const sellProximity75 = checkSellProximity(stock.currentPrice, sell75Price, chartType);
+                                    
+                                    // 매도타점 도달 이력 체크 및 저장
+                                    if (!stock.reachedHistory) {
+                                        stock.reachedHistory = {};
+                                    }
+                                    if (stock.currentPrice) {
+                                        if (stock.currentPrice >= sell25Price && !stock.reachedHistory.reachedSell25) {
+                                            stock.reachedHistory.reachedSell25 = true;
+                                            localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase));
+                                        }
+                                        if (stock.currentPrice >= sell33Price && !stock.reachedHistory.reachedSell33) {
+                                            stock.reachedHistory.reachedSell33 = true;
+                                            localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase));
+                                        }
+                                        if (stock.currentPrice >= sell50Price && !stock.reachedHistory.reachedSell50) {
+                                            stock.reachedHistory.reachedSell50 = true;
+                                            localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase));
+                                        }
+                                        if (stock.currentPrice >= sell75Price && !stock.reachedHistory.reachedSell75) {
+                                            stock.reachedHistory.reachedSell75 = true;
+                                            localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase));
+                                        }
+                                    }
+                                    
+                                    const reachedSell25 = stock.reachedHistory?.reachedSell25 || false;
+                                    const reachedSell33 = stock.reachedHistory?.reachedSell33 || false;
+                                    const reachedSell50 = stock.reachedHistory?.reachedSell50 || false;
+                                    const reachedSell75 = stock.reachedHistory?.reachedSell75 || false;
+                                    
+                                    // 매도타점 표시 (도달: 파란실선, 근접: 파란박스)
+                                    if (sellProximity25.isReached || reachedSell25) {
+                                        sell25 = `<div class="sell-proximity-box-reached">${formatPrice(sell25Price)}</div>`;
+                                    } else if (sellProximity25.isClose) {
+                                        sell25 = `<div class="sell-proximity-box">${formatPrice(sell25Price)}</div>`;
+                                    } else {
+                                        sell25 = formatPrice(sell25Price);
+                                    }
+                                    
+                                    if (sellProximity33.isReached || reachedSell33) {
+                                        sell33 = `<div class="sell-proximity-box-reached">${formatPrice(sell33Price)}</div>`;
+                                    } else if (sellProximity33.isClose) {
+                                        sell33 = `<div class="sell-proximity-box">${formatPrice(sell33Price)}</div>`;
+                                    } else {
+                                        sell33 = formatPrice(sell33Price);
+                                    }
+                                    
+                                    if (sellProximity50.isReached || reachedSell50) {
+                                        sell50 = `<div class="sell-proximity-box-reached">${formatPrice(sell50Price)}</div>`;
+                                    } else if (sellProximity50.isClose) {
+                                        sell50 = `<div class="sell-proximity-box">${formatPrice(sell50Price)}</div>`;
+                                    } else {
+                                        sell50 = formatPrice(sell50Price);
+                                    }
+                                    
+                                    if (sellProximity75.isReached || reachedSell75) {
+                                        sell75 = `<div class="sell-proximity-box-reached">${formatPrice(sell75Price)}</div>`;
+                                    } else if (sellProximity75.isClose) {
+                                        sell75 = `<div class="sell-proximity-box">${formatPrice(sell75Price)}</div>`;
+                                    } else {
+                                        sell75 = formatPrice(sell75Price);
+                                    }
+                                }
+                                
+                                const dday = calculateDDay(stock.highDate);
+                                let ddayBadge = '';
+                                let is40Disabled = false; // 40% 타점 금지 여부
+                                
+                                if (dday.text) {
+                                    let badgeClass = 'd-day-badge';
+                                    if (chartType === 'minute' && dday.days > 0) {
+                                        if (dday.days >= 30) {
+                                            badgeClass += ' danger'; // D+30 이상: 빨간색
+                                        } else if (dday.days >= 14) {
+                                            badgeClass += ' warning'; // D+14~29: 노란색
+                                        } else if (dday.days >= 2) {
+                                            // D+2~13: 보라색 (기본)
+                                            is40Disabled = true; // D+2부터 40% 금지
+                                        } else if (dday.days >= 0) {
+                                            badgeClass += ' orange'; // D+0~1: 주황색
+                                        }
+                                    } else if (chartType === 'daily' && dday.days > 0) {
+                                        if (dday.days >= 80) {
+                                            badgeClass += ' danger'; // D+80 이상: 빨간색
+                                        } else if (dday.days >= 60) {
+                                            badgeClass += ' warning'; // D+60~79: 노란색
+                                        }
+                                    }
+                                    ddayBadge = `<span class="${badgeClass}">${dday.text}</span>`;
+                                }
+                                
+                                const riseRate = (((buy40.adjusted - buy50.adjusted) / buy50.adjusted) * 100).toFixed(2);
+                                const riseRateBadge = `<span class="rise-rate-badge">${riseRate}%</span>`;
+                                
+                                // 현재가/등락률 표시
+                                let priceInfo = '';
+                                if (stock.currentPrice && stock.changeRate !== null) {
+                                    const priceClass = stock.changeRate > 0 ? 'price-up' : stock.changeRate < 0 ? 'price-down' : 'price-flat';
+                                    const arrow = stock.changeRate > 0 ? '▲' : stock.changeRate < 0 ? '▼' : '';
+                                    priceInfo = `<span class="realtime-price">
+                                        <span class="realtime-price-value ${priceClass}">${stock.currentPrice.toLocaleString()}원</span>
+                                        <span class="realtime-price-change ${priceClass}">${arrow} ${stock.changeRate.toFixed(2)}%</span>
+                                    </span>`;
+                                }
+                                
+                                // 매수타점 근접도 체크 (chartType 전달)
+                                const proximity40 = checkProximity(stock.currentPrice, buy40.adjusted, chartType);
+                                const proximity50 = checkProximity(stock.currentPrice, buy50.adjusted, chartType);
+                                const proximity60 = checkProximity(stock.currentPrice, buy60.adjusted, chartType);
+                                const proximity70 = checkProximity(stock.currentPrice, buy70.adjusted, chartType);
+                                
+                                // 도달 이력 초기화 (없으면 생성)
+                                if (!stock.reachedHistory) {
+                                    stock.reachedHistory = {
+                                        reached40: false,
+                                        reached45: false,
+                                        reached50: false,
+                                        reached55: false,
+                                        reached60: false,
+                                        reached65: false,
+                                        reached70: false,
+                                        reachedSell25: false,
+                                        reachedSell33: false,
+                                        reachedSell50: false,
+                                        reachedSell75: false
+                                    };
+                                }
+                                
+                                // 현재 가격이 각 타점에 도달했는지 체크하고 이력에 저장
+                                if (stock.currentPrice) {
+                                    if (stock.currentPrice <= buy40.adjusted && !stock.reachedHistory.reached40) {
+                                        stock.reachedHistory.reached40 = true;
+                                        localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase));
+                                    }
+                                    if (stock.currentPrice <= buy45.adjusted && !stock.reachedHistory.reached45) {
+                                        stock.reachedHistory.reached45 = true;
+                                        localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase));
+                                    }
+                                    if (stock.currentPrice <= buy50.adjusted && !stock.reachedHistory.reached50) {
+                                        stock.reachedHistory.reached50 = true;
+                                        localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase));
+                                    }
+                                    if (stock.currentPrice <= buy55.adjusted && !stock.reachedHistory.reached55) {
+                                        stock.reachedHistory.reached55 = true;
+                                        localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase));
+                                    }
+                                    if (stock.currentPrice <= buy60.adjusted && !stock.reachedHistory.reached60) {
+                                        stock.reachedHistory.reached60 = true;
+                                        localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase));
+                                    }
+                                    if (stock.currentPrice <= buy65.adjusted && !stock.reachedHistory.reached65) {
+                                        stock.reachedHistory.reached65 = true;
+                                        localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase));
+                                    }
+                                    if (stock.currentPrice <= buy70.adjusted && !stock.reachedHistory.reached70) {
+                                        stock.reachedHistory.reached70 = true;
+                                        localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase));
+                                    }
+                                }
+                                
+                                // 이력을 기반으로 도달 여부 결정 (한번 터치하면 영구 유지)
+                                const reached40 = stock.reachedHistory.reached40;
+                                const reached45 = stock.reachedHistory.reached45;
+                                const reached50 = stock.reachedHistory.reached50;
+                                const reached55 = stock.reachedHistory.reached55;
+                                const reached60 = stock.reachedHistory.reached60;
+                                const reached65 = stock.reachedHistory.reached65;
+                                const reached70 = stock.reachedHistory.reached70;
+                                
+                                // 40% 타점 표시 (금지 여부 및 도달 여부에 따라)
+                                let buy40Display;
+                                if (is40Disabled) {
+                                    buy40Display = '<span style="text-decoration: line-through; opacity: 0.4;">' + formatPrice(buy40.adjusted) + '</span> <span style="color: #ef4444;">🚫</span>';
+                                } else {
+                                    // 3단계 표시: 녹색(근접), 주황(도달), 주황실선(도달이하/과거도달)
+                                    if (proximity40.isBelow || reached40) {
+                                        buy40Display = `<div class="proximity-box-below">${formatPrice(buy40.adjusted)}</div>`;
+                                    } else if (proximity40.isEqual) {
+                                        buy40Display = `<div class="proximity-box-equal">${formatPrice(buy40.adjusted)}</div>`;
+                                    } else if (proximity40.isClose) {
+                                        buy40Display = `<div class="proximity-box">${formatPrice(buy40.adjusted)}</div>`;
+                                    } else {
+                                        buy40Display = formatPrice(buy40.adjusted);
+                                    }
+                                }
+                                
+                                // 45% 타점 (일봉 전용)
+                                const buy45Display = reached45 
+                                    ? `<div class="proximity-box-below">${formatPrice(buy45.adjusted)}</div>`
+                                    : formatPrice(buy45.adjusted);
+                                
+                                // 50% 타점 (3단계)
+                                let buy50Display;
+                                if (proximity50.isBelow || reached50) {
+                                    buy50Display = `<div class="proximity-box-below">${formatPrice(buy50.adjusted)}</div>`;
+                                } else if (proximity50.isEqual) {
+                                    buy50Display = `<div class="proximity-box-equal">${formatPrice(buy50.adjusted)}</div>`;
+                                } else if (proximity50.isClose) {
+                                    buy50Display = `<div class="proximity-box">${formatPrice(buy50.adjusted)}</div>`;
+                                } else {
+                                    buy50Display = formatPrice(buy50.adjusted);
+                                }
+                                
+                                // 55% 타점 (일봉 전용)
+                                const buy55Display = reached55
+                                    ? `<div class="proximity-box-below">${formatPrice(buy55.adjusted)}</div>`
+                                    : formatPrice(buy55.adjusted);
+                                
+                                // 60% 타점 (3단계)
+                                let buy60Display;
+                                if (proximity60.isBelow || reached60) {
+                                    buy60Display = `<div class="proximity-box-below">${formatPrice(buy60.adjusted)}</div>`;
+                                } else if (proximity60.isEqual) {
+                                    buy60Display = `<div class="proximity-box-equal">${formatPrice(buy60.adjusted)}</div>`;
+                                } else if (proximity60.isClose) {
+                                    buy60Display = `<div class="proximity-box">${formatPrice(buy60.adjusted)}</div>`;
+                                } else {
+                                    buy60Display = formatPrice(buy60.adjusted);
+                                }
+                                
+                                // 65% 타점 (일봉 전용)
+                                const buy65Display = reached65
+                                    ? `<div class="proximity-box-below">${formatPrice(buy65.adjusted)}</div>`
+                                    : formatPrice(buy65.adjusted);
+                                
+                                // 70% 타점 (3단계)
+                                let buy70Display;
+                                if (proximity70.isBelow || reached70) {
+                                    buy70Display = `<div class="proximity-box-below">${formatPrice(buy70.adjusted)}</div>`;
+                                } else if (proximity70.isEqual) {
+                                    buy70Display = `<div class="proximity-box-equal">${formatPrice(buy70.adjusted)}</div>`;
+                                } else if (proximity70.isClose) {
+                                    buy70Display = `<div class="proximity-box">${formatPrice(buy70.adjusted)}</div>`;
+                                } else {
+                                    buy70Display = formatPrice(buy70.adjusted);
+                                }
+                                
+                                return `
+                                    <tr class="${selected} ${chartType === 'minute' ? 'hover:bg-amber-50' : 'hover:bg-blue-50'} cursor-pointer border-b transition-colors whitespace-nowrap" 
+                                        draggable="true"
+                                        ondragstart="handleDragStart(event, ${globalIndex})"
+                                        ondragover="handleDragOver(event)"
+                                        ondrop="handleDrop(event, ${globalIndex})"
+                                        ondragend="handleDragEnd(event)"
+                                        onclick="loadStock(${globalIndex})">
+                                        <td class="drag-handle" onclick="event.stopPropagation()">⋮⋮</td>
+                                        <td class="p-2 font-bold">${stock.name}${ddayBadge}${riseRateBadge}${priceInfo}</td>
+                                        <td class="p-2 text-center text-pink-600 font-semibold">${buy40Display}</td>
+                                        ${chartType === 'daily' ? `<td class="p-2 text-center text-gray-900 font-semibold">${buy45Display}</td>` : ''}
+                                        <td class="p-2 text-center text-blue-600 font-semibold">${buy50Display}</td>
+                                        ${chartType === 'daily' ? `<td class="p-2 text-center text-gray-900 font-semibold">${buy55Display}</td>` : ''}
+                                        <td class="p-2 text-center text-yellow-600 font-semibold">${buy60Display}</td>
+                                        ${chartType === 'daily' ? `<td class="p-2 text-center text-gray-900 font-semibold">${buy65Display}</td>` : ''}
+                                        <td class="p-2 text-center text-red-600 font-semibold">${buy70Display}</td>
+                                        <td class="p-2 text-center text-blue-500 font-semibold">${sell25}</td>
+                                        <td class="p-2 text-center text-blue-500 font-semibold">${sell33}</td>
+                                        <td class="p-2 text-center text-blue-500 font-semibold">${sell50}</td>
+                                        <td class="p-2 text-center text-blue-500 font-semibold">${sell75}</td>
+                                        <td class="p-2 text-center">
+                                            <button class="delete-btn" onclick="deleteStock(${globalIndex}, event)">삭제</button>
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        function handleDragStart(e, index) {
+            draggedIndex = index;
+            e.target.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            return false;
+        }
+
+        function handleDrop(e, targetIndex) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            if (draggedIndex === null || draggedIndex === targetIndex) {
+                return false;
+            }
+
+            const draggedItem = stockDatabase[draggedIndex];
+            stockDatabase.splice(draggedIndex, 1);
+            stockDatabase.splice(targetIndex, 0, draggedItem);
+
+            if (currentSelectedIndex === draggedIndex) {
+                currentSelectedIndex = targetIndex;
+            } else if (draggedIndex < currentSelectedIndex && targetIndex >= currentSelectedIndex) {
+                currentSelectedIndex--;
+            } else if (draggedIndex > currentSelectedIndex && targetIndex <= currentSelectedIndex) {
+                currentSelectedIndex++;
+            }
+
+            localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase));
+            renderStockList();
+            
+            return false;
+        }
+
+        function handleDragEnd(e) {
+            e.target.classList.remove('dragging');
+            draggedIndex = null;
+        }
+
+        function loadStock(index) {
+            currentSelectedIndex = index;
+            const stock = stockDatabase[index];
+            
+            document.getElementById('chartType').value = stock.chartType || 'minute';
+            document.getElementById('stockName').value = stock.name;
+            document.getElementById('stockCode').value = stock.code || '';
+            document.getElementById('highDate').value = stock.highDate || '';
+            document.getElementById('highPrice').value = stock.high.toLocaleString('ko-KR');
+            document.getElementById('lowPrice').value = stock.low.toLocaleString('ko-KR');
+            document.getElementById('bouncePrice').value = stock.bounce !== null ? stock.bounce.toLocaleString('ko-KR') : '';
+            
+            calculate();
+            renderStockList();
+        }
+
+        function deleteStock(index, event) {
+            event.stopPropagation();
+            
+            const stock = stockDatabase[index];
+            if (confirm(`"${stock.name}" 종목을 삭제하시겠습니까?`)) {
+                stockDatabase.splice(index, 1);
+                localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase));
+                
+                if (currentSelectedIndex === index) {
+                    currentSelectedIndex = -1;
+                } else if (currentSelectedIndex > index) {
+                    currentSelectedIndex--;
+                }
+                
+                renderStockList();
+                
+                // 실시간 시세 재등록
+                registerAllStocks();
+            }
+        }
+
+        // ========== 페이지 로드 ==========
+        window.onload = function() {
+            renderStockList();
+            gapiLoaded();
+            gisLoaded();
+            
+            // 키움 API 자동 연결 시도
+            connectKiwoomAPI();
+            
+            const waitForInit = setInterval(async () => {
+                if (gapiInited && gisInited) {
+                    clearInterval(waitForInit);
+                    await restoreLoginState();
+                }
+            }, 100);
+        };
+    </script>
+    
+    <!-- 알림 설정 모달 -->
+    <div id="alertModal" class="alert-modal">
+        <div class="alert-modal-content">
+            <h2 class="text-2xl font-bold mb-6">🔔 알림 설정</h2>
+            
+            <div class="space-y-4">
+                <!-- 알림음 설정 -->
+                <div class="flex items-center justify-between">
+                    <label class="font-semibold">알림음 활성화</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="soundAlertToggle" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                
+                <!-- 알림 민감도 -->
+                <div>
+                    <label class="font-semibold block mb-2">알림 민감도 (매수타점 근접 %)</label>
+                    <input type="number" id="alertThreshold" value="2" min="0.5" max="10" step="0.5" 
+                           class="border-2 border-gray-300 rounded-lg px-4 py-2 w-full">
+                    <p class="text-sm text-gray-600 mt-1">매수타점에서 ±이 범위 내에 오면 알림</p>
+                </div>
+                
+                <!-- 텔레그램 설정 안내 -->
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h3 class="font-semibold text-blue-900 mb-2">📱 텔레그램 알림 설정</h3>
+                    <p class="text-sm text-blue-800 mb-2">
+                        텔레그램 알림은 서버(app.py) 파일에서 설정합니다:
+                    </p>
+                    <ol class="text-sm text-blue-700 list-decimal ml-5 space-y-1">
+                        <li>BotFather에서 봇 생성 후 토큰 받기</li>
+                        <li>app.py에서 TELEGRAM_BOT_TOKEN 설정</li>
+                        <li>봇과 대화 후 TELEGRAM_CHAT_ID 설정</li>
+                        <li>TELEGRAM_ENABLED = True로 변경</li>
+                    </ol>
+                </div>
+                
+                <!-- 테스트 버튼 -->
+                <div class="flex gap-3">
+                    <button onclick="testAlertSound()" 
+                            class="flex-1 bg-orange-500 text-white py-3 rounded-lg font-semibold hover:bg-orange-600 transition">
+                        🔊 매수 알림음
+                    </button>
+                    <button onclick="testSellAlertSound()" 
+                            class="flex-1 bg-blue-500 text-white py-3 rounded-lg font-semibold hover:bg-blue-600 transition">
+                        🔊 매도 알림음
+                    </button>
+                </div>
+            </div>
+            
+            <div class="flex gap-3 mt-6">
+                <button onclick="saveAlertSettings()" 
+                        class="flex-1 bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition">
+                    저장
+                </button>
+                <button onclick="closeAlertSettings()" 
+                        class="flex-1 bg-gray-400 text-white py-3 rounded-lg font-semibold hover:bg-gray-500 transition">
+                    닫기
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // 알림 설정 변수
+        let soundAlertEnabled = true;
+        let alertThreshold = 2.0;
+        
+        // Web Audio API로 알림음 생성
+        let audioContext;
+        let alertSound;
+        
+        function initAudio() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+        
+        function playAlertSound() {
+            if (!soundAlertEnabled) return;
+            
+            try {
+                initAudio();
+                
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                
+                // 첫 번째 비프음
+                oscillator.frequency.value = 800;
+                gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+                
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + 0.2);
+                
+                // 두 번째 비프음
+                setTimeout(() => {
+                    const osc2 = audioContext.createOscillator();
+                    const gain2 = audioContext.createGain();
+                    
+                    osc2.connect(gain2);
+                    gain2.connect(audioContext.destination);
+                    
+                    osc2.frequency.value = 1000;
+                    gain2.gain.setValueAtTime(0.3, audioContext.currentTime);
+                    gain2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+                    
+                    osc2.start(audioContext.currentTime);
+                    osc2.stop(audioContext.currentTime + 0.2);
+                }, 150);
+                
+            } catch (e) {
+                console.error('알림음 재생 오류:', e);
+            }
+        }
+        
+        // 매도 알림음 (MP3 파일 재생)
+        let sellAlertAudio = null;
+        
+        function initSellAlertSound() {
+            if (!sellAlertAudio) {
+                sellAlertAudio = new Audio('sell_alert.mp3');
+                sellAlertAudio.volume = 0.7;
+            }
+        }
+        
+        function playSellAlertSound() {
+            if (!soundAlertEnabled) return;
+            
+            try {
+                initSellAlertSound();
+                sellAlertAudio.currentTime = 0;
+                sellAlertAudio.play().catch(e => {
+                    console.error('매도 알림음 재생 오류:', e);
+                    // MP3 재생 실패시 대체 비프음
+                    playFallbackSellSound();
+                });
+            } catch (e) {
+                console.error('매도 알림음 초기화 오류:', e);
+                playFallbackSellSound();
+            }
+        }
+        
+        // MP3 재생 실패시 대체 비프음 (높은 음색 3연속)
+        function playFallbackSellSound() {
+            try {
+                initAudio();
+                
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                
+                oscillator.frequency.value = 1200;
+                gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+                
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + 0.15);
+                
+                setTimeout(() => {
+                    const osc2 = audioContext.createOscillator();
+                    const gain2 = audioContext.createGain();
+                    
+                    osc2.connect(gain2);
+                    gain2.connect(audioContext.destination);
+                    
+                    osc2.frequency.value = 1500;
+                    gain2.gain.setValueAtTime(0.3, audioContext.currentTime);
+                    gain2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+                    
+                    osc2.start(audioContext.currentTime);
+                    osc2.stop(audioContext.currentTime + 0.15);
+                }, 100);
+                
+                setTimeout(() => {
+                    const osc3 = audioContext.createOscillator();
+                    const gain3 = audioContext.createGain();
+                    
+                    osc3.connect(gain3);
+                    gain3.connect(audioContext.destination);
+                    
+                    osc3.frequency.value = 1800;
+                    gain3.gain.setValueAtTime(0.3, audioContext.currentTime);
+                    gain3.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+                    
+                    osc3.start(audioContext.currentTime);
+                    osc3.stop(audioContext.currentTime + 0.2);
+                }, 200);
+                
+            } catch (e) {
+                console.error('대체 알림음 재생 오류:', e);
+            }
+        }
+        
+        function testAlertSound() {
+            playAlertSound();
+        }
+        
+        function testSellAlertSound() {
+            playSellAlertSound();
+        }
+        
+        function showAlertToast(message, type = 'near', watchMode = 'buy') {
+            // 기존 토스트 제거
+            const existingToast = document.querySelector('.alert-toast');
+            if (existingToast) {
+                existingToast.remove();
+            }
+            
+            const toast = document.createElement('div');
+            toast.className = 'alert-toast';
+            
+            // 매수/매도에 따라 다른 메시지와 스타일
+            let title, bgColor;
+            if (watchMode === 'sell') {
+                title = type === 'reached' ? '💰 매도타점 도달!' : '📈 매도타점 근접!';
+                bgColor = 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)'; // 파란색 계열
+            } else {
+                title = type === 'reached' ? '🎯 매수타점 도달!' : '⚠️ 매수타점 근접!';
+                bgColor = 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'; // 주황색 계열
+            }
+            
+            toast.style.background = bgColor;
+            toast.innerHTML = `
+                <div class="font-bold mb-1">${title}</div>
+                <div class="text-sm">${message}</div>
+            `;
+            document.body.appendChild(toast);
+            
+            // 매수/매도에 따라 다른 알림음
+            if (watchMode === 'sell') {
+                playSellAlertSound();
+            } else {
+                playAlertSound();
+            }
+            
+            // 5초 후 자동 제거
+            setTimeout(() => {
+                toast.style.animation = 'slideIn 0.3s ease-out reverse';
+                setTimeout(() => toast.remove(), 300);
+            }, 5000);
+        }
+        
+        function openAlertSettings() {
+            document.getElementById('alertModal').classList.add('active');
+            
+            // 현재 설정 불러오기
+            soundAlertEnabled = localStorage.getItem('soundAlertEnabled') !== 'false';
+            alertThreshold = parseFloat(localStorage.getItem('alertThreshold') || '2.0');
+            
+            document.getElementById('soundAlertToggle').checked = soundAlertEnabled;
+            document.getElementById('alertThreshold').value = alertThreshold;
+        }
+        
+        function closeAlertSettings() {
+            document.getElementById('alertModal').classList.remove('active');
+        }
+        
+        function saveAlertSettings() {
+            soundAlertEnabled = document.getElementById('soundAlertToggle').checked;
+            alertThreshold = parseFloat(document.getElementById('alertThreshold').value);
+            
+            localStorage.setItem('soundAlertEnabled', soundAlertEnabled);
+            localStorage.setItem('alertThreshold', alertThreshold);
+            
+            // 서버에 알림 설정 전송
+            if (socket && socket.connected) {
+                socket.emit('update_alert_config', {
+                    threshold: alertThreshold
+                });
+            }
+            
+            alert('알림 설정이 저장되었습니다!');
+            closeAlertSettings();
+        }
+        
+        // 페이지 로드 시 설정 불러오기
+        soundAlertEnabled = localStorage.getItem('soundAlertEnabled') !== 'false';
+        alertThreshold = parseFloat(localStorage.getItem('alertThreshold') || '2.0');
+    </script>
+</body>
+</html>
