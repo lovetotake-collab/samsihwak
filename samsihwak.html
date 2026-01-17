@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>삼시확 매매 v12.3 (Connection Fixed)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        /* === 기존 스타일 유지 === */
+        body { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; }
+        .card { background: white; border-radius: 16px; box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1); padding: 24px; margin-bottom: 20px; }
+        input[type="text"], input[type="number"], select { border: 2px solid #e5e7eb; padding: 10px; border-radius: 8px; width: 100%; font-size: 16px; transition: all 0.3s; }
+        select { cursor: pointer; background-color: white; }
+        input:focus, select:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1); }
+        .input-gray { background: #f3f4f6; border-color: #9ca3af; }
+        .input-chart { background: #e0e7ff; border-color: #818cf8; }
+        .input-high { background: #fee2e2; border-color: #fca5a5; }
+        .input-low { background: #dbeafe; border-color: #93c5fd; }
+        .input-bounce { background: #d1fae5; border-color: #6ee7b7; }
+        .input-date { background: #fef3c7; border-color: #fbbf24; }
+        
+        .btn-calculate { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 14px 28px; border-radius: 10px; border: none; font-size: 18px; font-weight: bold; cursor: pointer; transition: all 0.3s; box-shadow: 0 4px 6px rgba(102, 126, 234, 0.3); }
+        .btn-calculate:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(102, 126, 234, 0.4); }
+        .btn-reset { background: #6b7280; color: white; padding: 14px 28px; border-radius: 10px; border: none; font-size: 18px; font-weight: bold; cursor: pointer; transition: all 0.3s; }
+        .btn-reset:hover { background: #4b5563; transform: translateY(-2px); }
+        
+        .btn-google, .btn-backup, .btn-load { color: white; padding: 10px 20px; border-radius: 8px; border: none; font-size: 14px; font-weight: bold; cursor: pointer; transition: all 0.3s; display: flex; align-items: center; gap: 8px; }
+        .btn-google { background: #4285f4; } .btn-google:hover { background: #357ae8; }
+        .btn-backup { background: #10b981; } .btn-backup:hover:not(:disabled) { background: #059669; }
+        .btn-load { background: #f59e0b; } .btn-load:hover:not(:disabled) { background: #d97706; }
+        button:disabled { background: #9ca3af; cursor: not-allowed; opacity: 0.5; }
+        
+        .sync-status, .api-status { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: 500; }
+        .connected { background: #d1fae5; color: #065f46; }
+        .disconnected { background: #fee2e2; color: #991b1b; }
+        .syncing { background: #fef3c7; color: #92400e; }
+        
+        .buy-box { padding: 16px; border-radius: 12px; margin-bottom: 12px; border: 2px solid; transition: all 0.2s; }
+        .buy-box:hover { transform: translateX(4px); }
+        .buy-40 { background: #fce7f3; border-color: #f472b6; }
+        .buy-50 { background: #dbeafe; border-color: #60a5fa; }
+        .buy-60 { background: #fef9c3; border-color: #facc15; }
+        .buy-70 { background: #fee2e2; border-color: #f87171; }
+        
+        /* Proximity Boxes */
+        .proximity-box { background: #bbf7d0 !important; border: 2px solid #22c55e !important; box-shadow: 0 0 10px rgba(34, 197, 94, 0.5); animation: pulse-green 1.5s infinite; border-radius: 6px; padding: 4px 8px; display: inline-block; }
+        .proximity-box-equal { background: #fed7aa !important; border: 2px solid #f97316 !important; box-shadow: 0 0 10px rgba(249, 115, 22, 0.5); animation: pulse-orange 1.5s infinite; border-radius: 6px; padding: 4px 8px; display: inline-block; }
+        
+        .proximity-box-below { 
+            background: white !important; 
+            border: 2px solid #f97316 !important; 
+            color: #f97316 !important; 
+            font-weight: bold; 
+            border-radius: 6px; 
+            padding: 4px 8px; 
+            display: inline-block; 
+            text-decoration: none; 
+            opacity: 1.0; 
+        }
+        
+        .sell-proximity-box { background: #bfdbfe !important; border: 2px solid #3b82f6 !important; box-shadow: 0 0 10px rgba(59, 130, 246, 0.5); animation: pulse-blue 1.5s infinite; border-radius: 6px; padding: 4px 8px; display: inline-block; }
+        .sell-proximity-box-reached { background: white !important; border: 2px solid #3b82f6 !important; color: #3b82f6 !important; font-weight: bold; border-radius: 6px; padding: 4px 8px; display: inline-block; }
+        
+        @keyframes pulse-green { 0%, 100% { opacity: 1; } 50% { opacity: 0.8; } }
+        @keyframes pulse-orange { 0%, 100% { opacity: 1; } 50% { opacity: 0.8; } }
+        @keyframes pulse-blue { 0%, 100% { opacity: 1; } 50% { opacity: 0.8; } }
+        
+        /* Realtime Price */
+        .price-up { color: #dc2626; font-weight: bold; }
+        .price-down { color: #2563eb; font-weight: bold; }
+        .price-flat { color: #1f2937; font-weight: bold; }
+        
+        .realtime-price { 
+            font-size: 11px; 
+            padding: 3px 6px; 
+            border-radius: 6px; 
+            background: #f3f4f6; 
+            margin-left: 4px; 
+            display: inline-flex; 
+            flex-direction: column; 
+            align-items: flex-end; 
+            justify-content: center;
+            line-height: 1.1; 
+            min-width: 65px;
+        }
+        .realtime-price-value { font-size: 12px; margin-bottom: 1px; } 
+        .realtime-price-change { font-size: 10px; opacity: 0.9; }
+        
+        /* Badges & Utils */
+        .delete-btn { background: #ef4444; color: white; padding: 4px 12px; border-radius: 6px; font-size: 12px; border: none; cursor: pointer; transition: 0.2s; }
+        .delete-btn:hover { background: #dc2626; }
+        .drag-handle { cursor: move; color: #9ca3af; padding: 0 8px; user-select: none; }
+        .d-day-badge { display: inline-block; background: #667eea; color: white; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; margin-right: 4px; vertical-align: middle; }
+        .d-day-badge.orange { background: #f97316; } .d-day-badge.warning { background: #fbbf24; color: #78350f; } .d-day-badge.danger { background: #ef4444; }
+        .rise-rate-badge { display: inline-block; background: #9ca3af; color: white; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; vertical-align: middle; }
+        .rise-rate-badge.green { background: #10b981; } .rise-rate-badge.orange { background: #f97316; } .rise-rate-badge.red { background: #ef4444; }
+        
+        /* N Badge (Left side) */
+        .new-high-badge { display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; font-size: 10px; font-weight: 800; padding: 1px 5px; border-radius: 4px; margin-right: 6px; box-shadow: 0 2px 4px rgba(220, 38, 38, 0.4); animation: pulse-red 1.5s infinite; vertical-align: middle; border: 1px solid #b91c1c; }
+        
+        /* NXT Badge (Right side) */
+        .nxt-badge { display: inline-flex; align-items: center; justify-content: center; background: #ef4444; color: white; font-size: 10px; font-weight: 800; padding: 1px 5px; border-radius: 4px; margin-left: 6px; box-shadow: 0 2px 4px rgba(220, 38, 38, 0.3); vertical-align: middle; border: 1px solid #b91c1c; }
+
+        @keyframes pulse-red { 0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { transform: scale(1.1); box-shadow: 0 0 0 4px rgba(239, 68, 68, 0); } 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
+
+        .stock-list-section { border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+        .minute-section { background: #fef3c7; border: 2px solid #fbbf24; }
+        .daily-section { background: #dbeafe; border: 2px solid #60a5fa; }
+        
+        /* Modal & History */
+        .alert-settings-btn, .alert-history-btn { background: #f59e0b; color: white; padding: 8px 12px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px; position: relative; }
+        .alert-history-btn { background: #6366f1; }
+        .noti-badge { position: absolute; top: -5px; right: -5px; background: #ef4444; color: white; font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 99px; border: 2px solid white; display: none; }
+        .alert-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
+        .alert-modal.active { display: flex; }
+        .alert-modal-content { background: white; padding: 32px; border-radius: 16px; width: 90%; max-width: 500px; max-height: 80vh; display: flex; flex-direction: column; }
+        .history-list-container { flex: 1; overflow-y: auto; padding: 4px; }
+        .history-item { display: flex; padding: 12px; border-bottom: 1px solid #f3f4f6; gap: 12px; }
+        .h-time { font-size: 0.75rem; color: #9ca3af; font-weight: 600; white-space: nowrap; margin-top: 2px; }
+        .h-content { flex: 1; } .h-title { font-weight: 700; color: #374155; font-size: 0.9rem; } .h-msg { font-size: 0.85rem; color: #6b7280; }
+        
+        .alert-toast { position: fixed; top: 20px; right: 20px; color: white; padding: 16px 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 2000; animation: slideIn 0.3s ease-out; max-width: 350px; }
+        @keyframes slideIn { from { transform: translateX(400px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+        /* Table Optimization */
+        table { border-collapse: collapse; }
+        table th { position: sticky; top: 0; z-index: 10; }
+        table tr:hover { background-color: rgba(255,255,255,0.5); }
+        
+        tr.search-highlight td { background: rgba(234, 179, 8, 0.4) !important; transition: background 0.5s ease; }
+        
+        .toggle-switch { position: relative; display: inline-block; width: 50px; height: 24px; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 24px; }
+        .toggle-slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .toggle-slider { background-color: #667eea; }
+        input:checked + .toggle-slider:before { transform: translateX(26px); }
+
+        .btn-search { background: #3b82f6; color: white; padding: 8px 16px; border-radius: 8px; border: none; font-weight: bold; cursor: pointer; }
+        
+        @media (max-width: 768px) {
+            .grid.grid-cols-6 { grid-template-columns: repeat(2, 1fr); }
+            table { font-size: 10px; } table th, table td { padding: 6px 2px !important; }
+        }
+    </style>
+</head>
+<body>
+    <div class="max-w-7xl mx-auto">
+        <div class="card">
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <h1 class="text-4xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
+                        📊 삼시확매매 확장판 v12.3
+                    </h1>
+                    <p class="text-gray-600 mt-2">NXT Indicator & New Layout (Price Stacked)</p>
+                </div>
+                <div class="flex flex-col items-end gap-2">
+                    <div class="flex items-center gap-2">
+                        <button id="historyBtn" class="alert-history-btn" onclick="openHistoryModal()">
+                            <span>📜</span><span>알림내역</span><span id="historyBadge" class="noti-badge">0</span>
+                        </button>
+                        <button id="alertSettingsBtn" class="alert-settings-btn" onclick="openAlertSettings()">
+                            <span>🔔</span><span>알림 설정</span>
+                        </button>
+                        <div id="apiStatus" class="api-status disconnected"><span>●</span><span id="apiStatusText">키움 API 연결 안됨</span></div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button id="backupBtn" class="btn-backup" onclick="manualBackup()" disabled><span>💾</span><span>백업</span></button>
+                        <button id="loadBtn" class="btn-load" onclick="manualLoad()" disabled><span>📥</span><span>로드</span></button>
+                        <button id="googleSignInBtn" class="btn-google" onclick="handleAuthClick()">
+                            <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#fff" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18z"/><path fill="#fff" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2a4.8 4.8 0 0 1-7.18-2.54H1.83v2.07A8 8 0 0 0 8.98 17z"/><path fill="#fff" d="M4.5 10.52a4.8 4.8 0 0 1 0-3.04V5.41H1.83a8 8 0 0 0 0 7.18l2.67-2.07z"/><path fill="#fff" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 0 0 1.83 5.4L4.5 7.49a4.77 4.77 0 0 1 4.48-3.3z"/></svg>
+                            <span id="googleBtnText">구글 로그인</span>
+                        </button>
+                    </div>
+                    <div id="syncStatus" class="sync-status disconnected"><span>●</span><span id="statusText">연결 안됨</span></div>
+                    <div id="lastSyncTime" class="text-xs text-gray-500"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 class="text-2xl font-bold mb-4 text-gray-700">📝 종목 정보 입력</h2>
+            <input type="hidden" id="apiServerUrl" value="http://localhost:5000">
+            <div class="grid grid-cols-6 gap-3">
+                <div><label class="block text-sm font-semibold mb-2 text-indigo-600">차트</label><select id="chartType" class="input-chart"><option value="minute">분봉</option><option value="daily">일봉</option></select></div>
+                <div><label class="block text-sm font-semibold mb-2 text-gray-600">종목명</label><input type="text" id="stockName" class="input-gray"></div>
+                <div><label class="block text-sm font-semibold mb-2 text-purple-600">종목코드</label><input type="text" id="stockCode" maxlength="6" class="input-gray"></div>
+                <div><label class="block text-sm font-semibold mb-2 text-amber-600">고점일</label><input type="text" id="highDate" class="input-date" maxlength="6" oninput="formatDateInput(this)"></div>
+                <div><label class="block text-sm font-semibold mb-2 text-red-600">고점 (원)</label><input type="text" id="highPrice" class="input-high" oninput="formatInput(this)"></div>
+                <div><label class="block text-sm font-semibold mb-2 text-blue-600">저점 (원)</label><input type="text" id="lowPrice" class="input-low" oninput="formatInput(this)"></div>
+                <div><label class="block text-sm font-semibold mb-2 text-green-600">반등저점 (원)</label><input type="text" id="bouncePrice" placeholder="선택사항" class="input-bounce" oninput="formatInput(this)"></div>
+            </div>
+            <div class="flex items-end pt-3">
+                <label class="flex items-center gap-2 cursor-pointer bg-slate-50 border border-slate-300 px-3 py-2 rounded-lg hover:bg-slate-100 transition">
+                    <input type="checkbox" id="isNxt" class="w-4 h-4 accent-red-600">
+                    <span class="text-sm font-bold text-red-600">NXT 거래가능</span>
+                </label>
+            </div>
+            
+            <div class="mt-4 grid grid-cols-3 gap-3">
+                <button class="btn-calculate" onclick="calculate()">✅ 계산하기</button>
+                <button class="btn-calculate" onclick="addToList()" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">💾 리스트에 추가</button>
+                <button class="btn-reset" onclick="resetInputs()">🔄 입력 초기화</button>
+            </div>
+            <div class="mt-3 text-sm text-gray-600 bg-purple-50 p-3 rounded-lg border border-purple-200">
+                💡 <strong>팁:</strong> 등록 시 <strong>과거 타점 도달 여부</strong>를 자동으로 체크합니다.
+            </div>
+        </div>
+
+        <div class="card flex gap-3 items-center" style="padding: 15px 24px;">
+            <span class="text-gray-500 font-bold whitespace-nowrap">🔍 리스트 검색:</span>
+            <input type="text" id="searchQuery" placeholder="종목명 입력" class="w-64 border-2 border-gray-200 p-2 rounded" onkeydown="if(event.key==='Enter') searchStockInList()">
+            <button onclick="searchStockInList()" class="btn-search">검색</button>
+        </div>
+
+        <div class="card">
+            <h2 class="text-2xl font-bold mb-4 text-gray-700">📋 종목리스트</h2>
+            <div class="stock-list-section minute-section">
+                <h3 class="text-lg font-bold mb-3 text-amber-900 flex items-center gap-2">⚡ 분봉 종목리스트 <span class="text-sm font-normal text-amber-700">(단기 매매)</span></h3>
+                <div id="minuteStockList"></div>
+            </div>
+            <div class="stock-list-section daily-section">
+                <h3 class="text-lg font-bold mb-3 text-blue-900 flex items-center gap-2">📈 일봉 종목리스트 <span class="text-sm font-normal text-blue-700">(중장기 매매)</span></h3>
+                <div id="dailyStockList"></div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <div class="card">
+                <h2 class="text-2xl font-bold mb-4 text-gray-700">🎯 매수 타점</h2>
+                <div id="buyPoints"></div>
+            </div>
+            <div class="card">
+                <h2 class="text-2xl font-bold mb-4 text-gray-700" id="sellTitle">💰 매도 타점</h2>
+                <div id="sellPoints"><div class="text-center text-gray-500 py-8">반등저점을 입력하면<br>매도 타점이 표시됩니다</div></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const CLIENT_ID = '574140412573-n0jau2i3uph1v5p3hi9v004m44bnopq8.apps.googleusercontent.com';
+        const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
+        const SCOPES = 'https://www.googleapis.com/auth/drive.file';
+        const FILE_NAME = 'samsihwak_extended_stocks.json';
+        const HISTORY_STORAGE_KEY = 'samsihwak_history';
+
+        let notificationHistory = [];
+        let unreadCount = 0;
+        let codeClient, gapiInited = false, gisInited = false, isSignedIn = false, accessToken = null;
+        let driveFileId = null;
+        let tokenRefreshTimer = null; 
+        let stockDatabase = [];
+        let currentSelectedId = null;
+        let draggedId = null;
+        
+        // [수정 1] socket 변수 선언 (API 연결 에러 방지)
+        let socket = null;
+
+        const savedData = localStorage.getItem('samsihwakExtendedStocks');
+        if (savedData) { stockDatabase = JSON.parse(savedData); sanitizeData(); }
+        const savedHistory = sessionStorage.getItem(HISTORY_STORAGE_KEY);
+        if (savedHistory) { notificationHistory = JSON.parse(savedHistory); }
+
+        function sanitizeData() {
+            let changed = false;
+            stockDatabase.forEach((s, idx) => { if (!s.id) { s.id = Date.now() + idx; changed = true; } });
+            if (changed) localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase));
+        }
+
+        // ==========================================
+        // Google Auth & Drive (Backend Refresh)
+        // ==========================================
+        
+        // 1. GAPI Load
+        function gapiLoaded() { 
+            gapi.load('client', async () => { 
+                await gapi.client.init({ discoveryDocs: [DISCOVERY_DOC] }); 
+                gapiInited = true; 
+                trySilentLogin(); 
+                maybeEnableButtons(); 
+            }); 
+        }
+
+        // 2. GIS Load
+        function gisLoaded() { 
+            codeClient = google.accounts.oauth2.initCodeClient({ 
+                client_id: CLIENT_ID, 
+                scope: SCOPES, 
+                ux_mode: 'popup',
+                callback: (response) => {
+                    if (response.code) exchangeCodeForToken(response.code);
+                }
+            }); 
+            gisInited = true; 
+            maybeEnableButtons(); 
+        }
+
+        function maybeEnableButtons() { 
+            if (gapiInited && gisInited) document.getElementById('googleSignInBtn').disabled = false; 
+        }
+
+        async function exchangeCodeForToken(code) {
+            try {
+                const res = await fetch('/api/google/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ code: code })
+                });
+                const data = await res.json();
+                if (data.access_token) {
+                    applyAccessToken(data.access_token);
+                    alert("✅ 구글 로그인 성공 (서버 연동)");
+                } else {
+                    alert('로그인 실패: ' + JSON.stringify(data));
+                }
+            } catch (e) { console.error('Login error:', e); alert('서버 통신 오류'); }
+        }
+
+        async function trySilentLogin() {
+            try {
+                const res = await fetch('/api/google/get_token');
+                if (res.status === 200) {
+                    const data = await res.json();
+                    if (data.access_token) {
+                        applyAccessToken(data.access_token);
+                        console.log('🔄 백엔드에서 토큰 로드됨');
+                    }
+                }
+            } catch (e) { console.log('Silent login skipped'); }
+        }
+
+        function applyAccessToken(token) {
+            accessToken = token;
+            gapi.client.setToken({ access_token: token });
+            localStorage.setItem('google_access_token', token);
+            
+            isSignedIn = true;
+            updateSyncStatus('connected', '연결됨');
+            document.getElementById('backupBtn').disabled = false;
+            document.getElementById('loadBtn').disabled = false;
+            document.getElementById('googleBtnText').textContent = '로그아웃';
+
+            if (tokenRefreshTimer) clearInterval(tokenRefreshTimer);
+            tokenRefreshTimer = setInterval(trySilentLogin, 45 * 60 * 1000);
+        }
+
+        function handleAuthClick() {
+            if (isSignedIn) { 
+                const token = gapi.client.getToken();
+                if (token !== null) google.accounts.oauth2.revoke(token.access_token); 
+                gapi.client.setToken(''); 
+                accessToken = null;
+                isSignedIn = false; 
+                localStorage.removeItem('google_access_token');
+                updateSyncStatus('disconnected', '연결 안됨');
+                document.getElementById('backupBtn').disabled = true;
+                document.getElementById('loadBtn').disabled = true;
+                document.getElementById('googleBtnText').textContent = '구글 로그인';
+                if(tokenRefreshTimer) clearInterval(tokenRefreshTimer);
+            } else { 
+                codeClient.requestCode(); 
+            }
+        }
+
+        function updateSyncStatus(s,t) { const el=document.getElementById('syncStatus'); el.className=`sync-status ${s}`; document.getElementById('statusText').innerText=t; }
+        
+        async function loadFromGoogleDrive() {
+            try {
+                const q = await fetch(`https://www.googleapis.com/drive/v3/files?q=name='${FILE_NAME}' and trashed=false`, {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                const qJson = await q.json();
+                
+                if(qJson.files && qJson.files.length > 0) {
+                    driveFileId = qJson.files[0].id;
+                    const r = await fetch(`https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`, {
+                        headers: { 'Authorization': `Bearer ${accessToken}` }
+                    });
+                    const data = await r.json();
+                    stockDatabase = data; 
+                    sanitizeData(); renderStockList(); registerAllStocks();
+                    alert('✅ 구글 드라이브 데이터 로드 완료');
+                } else { alert('⚠️ 저장된 백업 파일이 없습니다.'); }
+            } catch(e){ console.error(e); alert('❌ 로드 실패: ' + e.message); }
+        }
+
+        async function manualBackup() { 
+            if(!isSignedIn) return alert('로그인 필요'); 
+            try {
+                const fileContent = new Blob([JSON.stringify(stockDatabase)], {type: 'application/json'});
+                const metadata = { name: FILE_NAME, mimeType: 'application/json' };
+                const form = new FormData();
+                form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+                form.append('file', fileContent);
+                
+                const q = await fetch(`https://www.googleapis.com/drive/v3/files?q=name='${FILE_NAME}' and trashed=false`, { 
+                    headers: { 'Authorization': `Bearer ${accessToken}` } 
+                });
+                const qJson = await q.json();
+                
+                if (qJson.files && qJson.files.length > 0) {
+                    const fileId = qJson.files[0].id;
+                    await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`, { 
+                        method: 'PATCH', 
+                        headers: { 'Authorization': `Bearer ${accessToken}` }, 
+                        body: form 
+                    });
+                } else {
+                    await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', { 
+                        method: 'POST', 
+                        headers: { 'Authorization': `Bearer ${accessToken}` }, 
+                        body: form 
+                    });
+                }
+                alert('✅ 구글 드라이브 백업 완료!'); 
+            } catch (e) { console.error(e); alert('❌ 백업 실패: ' + e.message); }
+        }
+        
+        async function manualLoad() { if(isSignedIn){ await loadFromGoogleDrive(); } else alert('로그인 필요'); }
+
+        let apiServerUrl = 'http://localhost:5000';
+        let soundAlertEnabled = true; let alertThreshold = 2.0; let audioContext;
+
+        function initSocketConnection() {
+            // [수정 2] socket 변수 초기화 상태 확인 로직 보완
+            if (socket && socket.connected) socket.disconnect();
+            socket = io(apiServerUrl, { transports: ['websocket', 'polling'], reconnection: true });
+            socket.on('connect', () => { updateAPIStatus('connected', '키움 API 연결됨'); registerAllStocks(); });
+            socket.on('disconnect', () => { updateAPIStatus('disconnected', '재연결 시도 중...'); });
+            socket.on('realtime_update', (data) => {
+                const { code, name, data: priceData } = data;
+                const targetStocks = stockDatabase.filter(s => s.code === code);
+                if (targetStocks.length > 0) {
+                    const currentPrice = priceData.current_price;
+                    let structureChanged = false;
+                    targetStocks.forEach(stock => {
+                        if (stock.high && currentPrice > stock.high) {
+                            const oldHigh = stock.high; stock.high = currentPrice;
+                            const today = new Date(); stock.highDate = today.toISOString().slice(2, 10).replace(/-/g, '');
+                            stock.reachedHistory = { reached40: false, reached45: false, reached50: false, reached55: false, reached60: false, reached65: false, reached70: false, reachedSell25: false, reachedSell33: false, reachedSell50: false, reachedSell75: false };
+                            if (socket && socket.connected) { socket.emit('req_high_update_alert', { code: stock.code, name: stock.name, old_high: oldHigh, new_high: currentPrice }); }
+                            addNotificationRecord(`${stock.name} 신고가`, `갱신: ${formatPrice(currentPrice)}원 (초기화됨)`); structureChanged = true;
+                        }
+                        stock.currentPrice = currentPrice; stock.changeRate = priceData.change_rate;
+                        updateStockHistory(stock);
+                        const priceEl = document.getElementById(`price-${stock.id}`); const rateEl = document.getElementById(`rate-${stock.id}`);
+                        if (priceEl && rateEl) {
+                            const changeRate = priceData.change_rate;
+                            const priceClass = changeRate > 0 ? 'price-up' : changeRate < 0 ? 'price-down' : 'price-flat';
+                            const sign = changeRate > 0 ? '▲' : changeRate < 0 ? '▼' : '';
+                            priceEl.textContent = `${parseInt(currentPrice).toLocaleString()}원`; priceEl.className = `realtime-price-value ${priceClass}`;
+                            rateEl.textContent = `${sign} ${Math.abs(changeRate).toFixed(2)}%`; rateEl.className = `realtime-price-change ${priceClass}`;
+                        }
+                        updateStockRowCells(stock);
+                    });
+                    localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase));
+                    if (structureChanged) renderStockList();
+                    if (currentSelectedId !== null) { const currentStock = stockDatabase.find(s => s.id === currentSelectedId); if(currentStock && currentStock.code === code) { document.getElementById('highPrice').value = currentStock.high.toLocaleString(); calculate(); } }
+                }
+            });
+            socket.on('price_alert', (data) => {
+                const { name, current_price, target_point, point_label, diff_percent, type, watch_mode } = data;
+                const plainMsg = `${formatPrice(current_price)}원 / 목표: ${formatPrice(target_point)}원`;
+                let title = watch_mode === 'sell' ? `💰 ${name} 매도타점` : `🎯 ${name} 매수타점`;
+                if(type === 'reached') title += ' 도달!'; else title += ' 근접';
+                addNotificationRecord(title, plainMsg); showAlertToast(`현재가: ${formatPrice(current_price)}원\n(${point_label} ${type === 'reached' ? '도달' : '근접'})`, type, watch_mode || 'buy');
+            });
+            socket.on('past_reach_result', (data) => {
+                const { id, reached } = data; const stock = stockDatabase.find(s => s.id === id);
+                if (stock) {
+                    let changed = false;
+                    for (const [key, val] of Object.entries(reached)) { if (val && !stock.reachedHistory[key]) { stock.reachedHistory[key] = true; changed = true; } }
+                    if (changed) { localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase)); updateStockRowCells(stock); showAlertToast(`${stock.name} 과거 타점 도달 확인됨`, 'reached', 'buy'); }
+                }
+            });
+        }
+
+        function updateStockRowCells(stock) {
+            const chartType = stock.chartType; const cells = generateStockCells(stock, chartType);
+            const setHtml = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
+            setHtml(`cell-b40-${stock.id}`, cells.buys.b40); if(cells.buys.b45) setHtml(`cell-b45-${stock.id}`, cells.buys.b45);
+            setHtml(`cell-b50-${stock.id}`, cells.buys.b50); if(cells.buys.b55) setHtml(`cell-b55-${stock.id}`, cells.buys.b55);
+            setHtml(`cell-b60-${stock.id}`, cells.buys.b60); if(cells.buys.b65) setHtml(`cell-b65-${stock.id}`, cells.buys.b65);
+            setHtml(`cell-b70-${stock.id}`, cells.buys.b70); setHtml(`cell-s25-${stock.id}`, cells.sells.p25);
+            setHtml(`cell-s33-${stock.id}`, cells.sells.p33); setHtml(`cell-s50-${stock.id}`, cells.sells.p50); setHtml(`cell-s75-${stock.id}`, cells.sells.p75);
+        }
+
+        function generateStockCells(stock, chartType) {
+            const diff = stock.high - stock.low;
+            const buyPoints = { buy40: adjustBuyPrice(stock.high - (diff * 0.382)), buy45: adjustBuyPrice(stock.high - (diff * 0.45)), buy50: adjustBuyPrice(stock.high - (diff * 0.5)), buy55: adjustBuyPrice(stock.high - (diff * 0.55)), buy60: adjustBuyPrice(stock.high - (diff * 0.6)), buy65: adjustBuyPrice(stock.high - (diff * 0.65)), buy70: adjustBuyPrice(stock.high - (diff * 0.7)) };
+            const h = stock.reachedHistory || {}; const dday = calculateDDay(stock.highDate); let is40Disabled = (chartType === 'minute' && dday.days >= 2);
+            const getBuyHtml = (pt, reached, label) => { if (label === 'b40' && is40Disabled) return `<span style="text-decoration: line-through; opacity: 0.4;">${formatPrice(pt.adjusted)}</span> <span style="color: #ef4444;">🚫</span>`; const prox = checkProximity(stock.currentPrice, pt.adjusted, chartType); if (prox.isBelow || reached) return `<div class="proximity-box-below">${formatPrice(pt.adjusted)}</div>`; if (prox.isEqual) return `<div class="proximity-box-equal">${formatPrice(pt.adjusted)}</div>`; if (prox.isClose) return `<div class="proximity-box">${formatPrice(pt.adjusted)}</div>`; return formatPrice(pt.adjusted); };
+            const buys = { b40: getBuyHtml(buyPoints.buy40, h.reached40, 'b40'), b45: getBuyHtml(buyPoints.buy45, h.reached45, 'b45'), b50: getBuyHtml(buyPoints.buy50, h.reached50, 'b50'), b55: getBuyHtml(buyPoints.buy55, h.reached55, 'b55'), b60: getBuyHtml(buyPoints.buy60, h.reached60, 'b60'), b65: getBuyHtml(buyPoints.buy65, h.reached65, 'b65'), b70: getBuyHtml(buyPoints.buy70, h.reached70, 'b70') };
+            let sells = { p25: '-', p33: '-', p50: '-', p75: '-' };
+            if (stock.bounce) { const bRange = stock.high - stock.bounce; const calcSell = (ratio) => adjustSellPrice(stock.bounce + (bRange * ratio)).adjusted; const sp = { p25: calcSell(0.25), p33: calcSell(0.33), p50: calcSell(0.50), p75: calcSell(0.75) }; const getSellHtml = (price, reachedKey) => { const prox = checkSellProximity(stock.currentPrice, price, chartType); if (prox.isReached || h[reachedKey]) return `<div class="sell-proximity-box-reached">${formatPrice(price)}</div>`; if (prox.isClose) return `<div class="sell-proximity-box">${formatPrice(price)}</div>`; return formatPrice(price); }; sells.p25 = getSellHtml(sp.p25, 'reachedSell25'); sells.p33 = getSellHtml(sp.p33, 'reachedSell33'); sells.p50 = getSellHtml(sp.p50, 'reachedSell50'); sells.p75 = getSellHtml(sp.p75, 'reachedSell75'); }
+            return { buys, sells };
+        }
+
+        function updateStockHistory(stock) { const diff = stock.high - stock.low; const buyPoints = { buy40: adjustBuyPrice(stock.high - (diff * 0.382)).adjusted, buy45: adjustBuyPrice(stock.high - (diff * 0.45)).adjusted, buy50: adjustBuyPrice(stock.high - (diff * 0.5)).adjusted, buy55: adjustBuyPrice(stock.high - (diff * 0.55)).adjusted, buy60: adjustBuyPrice(stock.high - (diff * 0.6)).adjusted, buy65: adjustBuyPrice(stock.high - (diff * 0.65)).adjusted, buy70: adjustBuyPrice(stock.high - (diff * 0.7)).adjusted }; if (!stock.reachedHistory) stock.reachedHistory = {}; if (stock.currentPrice) { if (stock.currentPrice <= buyPoints.buy40) stock.reachedHistory.reached40 = true; if (stock.currentPrice <= buyPoints.buy45) stock.reachedHistory.reached45 = true; if (stock.currentPrice <= buyPoints.buy50) stock.reachedHistory.reached50 = true; if (stock.currentPrice <= buyPoints.buy55) stock.reachedHistory.reached55 = true; if (stock.currentPrice <= buyPoints.buy60) stock.reachedHistory.reached60 = true; if (stock.currentPrice <= buyPoints.buy65) stock.reachedHistory.reached65 = true; if (stock.currentPrice <= buyPoints.buy70) stock.reachedHistory.reached70 = true; if (stock.bounce) { const bRange = stock.high - stock.bounce; if (stock.currentPrice >= adjustSellPrice(stock.bounce + bRange*0.25).adjusted) stock.reachedHistory.reachedSell25 = true; if (stock.currentPrice >= adjustSellPrice(stock.bounce + bRange*0.33).adjusted) stock.reachedHistory.reachedSell33 = true; if (stock.currentPrice >= adjustSellPrice(stock.bounce + bRange*0.50).adjusted) stock.reachedHistory.reachedSell50 = true; if (stock.currentPrice >= adjustSellPrice(stock.bounce + bRange*0.75).adjusted) stock.reachedHistory.reachedSell75 = true; } } }
+        function getTickSize(price) { if (price < 2000) return 1; if (price < 5000) return 5; if (price < 20000) return 10; if (price < 50000) return 50; if (price < 200000) return 100; if (price < 500000) return 500; return 1000; }
+        function adjustBuyPrice(price) { const tickSize = getTickSize(price); return { original: price, adjusted: Math.ceil(price / tickSize) * tickSize }; }
+        function adjustSellPrice(price) { const tickSize = getTickSize(price); return { original: price, adjusted: Math.floor(price / tickSize) * tickSize }; }
+        function formatDateInput(input) { let value = input.value.replace(/[^0-9]/g, ''); if (value.length > 6) value = value.substring(0, 6); input.value = value; }
+        function formatInput(input) { let value = input.value.replace(/[^0-9]/g, ''); if (value) input.value = parseInt(value).toLocaleString('ko-KR'); }
+        function formatPrice(price) { return Math.round(price).toLocaleString('ko-KR'); }
+        function formatPriceWithOriginal(adjusted, original) { return Math.abs(adjusted - original) > 0.01 ? `${formatPrice(adjusted)}원 <span class="text-xs text-gray-500">(${formatPrice(original)}원)</span>` : `${formatPrice(adjusted)}원`; }
+        function getNumericValue(elementId) { const value = document.getElementById(elementId).value.replace(/,/g, ''); return value ? parseFloat(value) : null; }
+        function checkProximity(currentPrice, targetPrice, chartType) { if (!currentPrice || !targetPrice) return { isClose: false, isEqual: false, isBelow: false }; const diff = currentPrice - targetPrice; const percentage = (diff / targetPrice) * 100; let closeMax, equalMax; if (chartType === 'daily') { closeMax = 3.0; equalMax = 1.0; } else { closeMax = 1.0; equalMax = 0.3; } if (diff < 0) return { isClose: false, isEqual: false, isBelow: true }; if (percentage >= 0 && percentage <= equalMax) return { isClose: false, isEqual: true, isBelow: false }; if (percentage > equalMax && percentage <= closeMax) return { isClose: true, isEqual: false, isBelow: false }; return { isClose: false, isEqual: false, isBelow: false }; }
+        function checkSellProximity(currentPrice, targetPrice, chartType) { if (!currentPrice || !targetPrice) return { isClose: false, isReached: false }; const diff = currentPrice - targetPrice; const percentage = (diff / targetPrice) * 100; const closeMax = chartType === 'daily' ? 3.0 : 1.0; if (diff >= 0) return { isClose: false, isReached: true }; if (percentage >= -closeMax && percentage < 0) return { isClose: true, isReached: false }; return { isClose: false, isReached: false }; }
+        function calculateDDay(dateStr) { if (!dateStr || dateStr.length !== 6) return { text: '', days: 0 }; try { const year = 2000 + parseInt(dateStr.substring(0, 2)); const month = parseInt(dateStr.substring(2, 4)) - 1; const day = parseInt(dateStr.substring(4, 6)); const targetDate = new Date(year, month, day); const today = new Date(); today.setHours(0, 0, 0, 0); targetDate.setHours(0, 0, 0, 0); let businessDays = 0; if (today > targetDate) { let current = new Date(targetDate); current.setDate(current.getDate() + 1); while (current <= today) { if (current.getDay() !== 0 && current.getDay() !== 6) businessDays++; current.setDate(current.getDate() + 1); } } return { text: businessDays > 0 ? `D+${businessDays}` : 'D-Day', days: businessDays }; } catch (e) { return { text: '', days: 0 }; } }
+
+        function renderStockList() { renderStockTable('minuteStockList', stockDatabase.filter(s => s.chartType === 'minute'), 'minute'); renderStockTable('dailyStockList', stockDatabase.filter(s => s.chartType === 'daily'), 'daily'); }
+        function renderStockTable(elementId, stocks, chartType) {
+            const listElement = document.getElementById(elementId); if (stocks.length === 0) { listElement.innerHTML = `<div class="text-center text-gray-400 py-8">아직 저장된 종목이 없습니다.</div>`; return; }
+            const now = new Date(); const todayYYMMDD = now.toISOString().slice(2, 10).replace(/-/g, '');
+            listElement.innerHTML = `
+                <div class="overflow-x-auto"><table class="w-full text-xs"><thead><tr class="bg-gradient-to-r ${chartType === 'minute' ? 'from-amber-100 to-yellow-100 border-amber-300' : 'from-blue-100 to-cyan-100 border-blue-300'} border-b-2"><th class="p-2 text-left font-bold whitespace-nowrap bg-white/50 backdrop-blur">⋮</th><th class="p-2 text-left font-bold whitespace-nowrap bg-white/50 backdrop-blur">종목명</th><th class="p-2 text-center font-bold text-pink-600 whitespace-nowrap bg-white/50 backdrop-blur">40%</th>${chartType === 'daily' ? '<th class="p-2 text-center font-bold text-gray-900 whitespace-nowrap bg-white/50 backdrop-blur">45%</th>' : ''}<th class="p-2 text-center font-bold text-blue-600 whitespace-nowrap bg-white/50 backdrop-blur">50%</th>${chartType === 'daily' ? '<th class="p-2 text-center font-bold text-gray-900 whitespace-nowrap bg-white/50 backdrop-blur">55%</th>' : ''}<th class="p-2 text-center font-bold text-yellow-600 whitespace-nowrap bg-white/50 backdrop-blur">60%</th>${chartType === 'daily' ? '<th class="p-2 text-center font-bold text-gray-900 whitespace-nowrap bg-white/50 backdrop-blur">65%</th>' : ''}<th class="p-2 text-center font-bold text-red-600 whitespace-nowrap bg-white/50 backdrop-blur">70%</th><th class="p-2 text-center font-bold text-blue-500 whitespace-nowrap bg-white/50 backdrop-blur">25%↑</th><th class="p-2 text-center font-bold text-blue-500 whitespace-nowrap bg-white/50 backdrop-blur">33%↑</th><th class="p-2 text-center font-bold text-blue-500 whitespace-nowrap bg-white/50 backdrop-blur">50%↑</th><th class="p-2 text-center font-bold text-blue-500 whitespace-nowrap bg-white/50 backdrop-blur">75%↑</th><th class="p-2 text-center whitespace-nowrap bg-white/50 backdrop-blur">관리</th></tr></thead><tbody>${stocks.map((stock) => { const selected = stock.id === currentSelectedId ? 'bg-purple-100' : ''; const cells = generateStockCells(stock, chartType); const dday = calculateDDay(stock.highDate); let ddayBadge = ''; if (dday.text) { let cls = 'd-day-badge'; if (chartType === 'minute' && dday.days > 0) { if (dday.days >= 30) cls += ' danger'; else if (dday.days >= 14) cls += ' warning'; else if (dday.days >= 0) cls += ' orange'; } else if (chartType === 'daily' && dday.days >= 60) cls += (dday.days >= 80 ? ' danger' : ' warning'); ddayBadge = `<span class="${cls}">${dday.text}</span>`; } const diff = stock.high - stock.low; const riseRate = (((Math.ceil((stock.high - diff*0.382)) - Math.ceil((stock.high - diff*0.5))) / Math.ceil((stock.high - diff*0.5))) * 100).toFixed(2); let rrCls = ''; if (chartType === 'minute') rrCls = parseFloat(riseRate) >= 15 ? 'red' : (parseFloat(riseRate) >= 10 ? 'orange' : (parseFloat(riseRate) >= 6 ? 'green' : '')); else rrCls = parseFloat(riseRate) >= 20 ? 'red' : (parseFloat(riseRate) >= 15 ? 'orange' : (parseFloat(riseRate) >= 10 ? 'green' : '')); const rrBadge = `<span class="rise-rate-badge ${rrCls}">${riseRate}%</span>`; const newHighBadge = (stock.highDate && String(stock.highDate) === todayYYMMDD) ? `<span class="new-high-badge">N</span>` : ''; const nxtBadge = stock.isNxt ? `<span class="nxt-badge">NXT</span>` : ''; let priceInfo = `<span class="realtime-price"><span id="price-${stock.id}" class="realtime-price-value">-</span><span id="rate-${stock.id}" class="realtime-price-change">-</span></span>`; if (stock.currentPrice) { const pc = stock.changeRate > 0 ? 'price-up' : (stock.changeRate < 0 ? 'price-down' : 'price-flat'); const arr = stock.changeRate > 0 ? '▲' : (stock.changeRate < 0 ? '▼' : ''); priceInfo = `<span class="realtime-price"><span id="price-${stock.id}" class="realtime-price-value ${pc}">${stock.currentPrice.toLocaleString()}원</span><span id="rate-${stock.id}" class="realtime-price-change ${pc}">${arr} ${stock.changeRate.toFixed(2)}%</span></span>`; } const nameSection = `<div class="flex flex-col justify-center"><div class="flex items-center">${newHighBadge}<span class="font-bold text-sm">${stock.name}</span>${nxtBadge}</div><div class="flex items-center mt-1 gap-1">${ddayBadge}${rrBadge}${priceInfo}</div></div>`; return `<tr id="row-${stock.id}" class="${selected} ${chartType === 'minute' ? 'hover:bg-amber-50' : 'hover:bg-blue-50'} cursor-pointer border-b transition-colors whitespace-nowrap" draggable="true" ondragstart="handleDragStart(event, ${stock.id})" ondragover="handleDragOver(event)" ondrop="handleDrop(event, ${stock.id})" ondragend="handleDragEnd(event)" onclick="loadStockById(${stock.id})"><td class="drag-handle" onclick="event.stopPropagation()">⋮⋮</td><td class="p-2">${nameSection}</td><td id="cell-b40-${stock.id}" class="p-2 text-center text-pink-600 font-semibold">${cells.buys.b40}</td>${chartType === 'daily' ? `<td id="cell-b45-${stock.id}" class="p-2 text-center text-gray-900 font-semibold">${cells.buys.b45}</td>` : ''}<td id="cell-b50-${stock.id}" class="p-2 text-center text-blue-600 font-semibold">${cells.buys.b50}</td>${chartType === 'daily' ? `<td id="cell-b55-${stock.id}" class="p-2 text-center text-gray-900 font-semibold">${cells.buys.b55}</td>` : ''}<td id="cell-b60-${stock.id}" class="p-2 text-center text-yellow-600 font-semibold">${cells.buys.b60}</td>${chartType === 'daily' ? `<td id="cell-b65-${stock.id}" class="p-2 text-center text-gray-900 font-semibold">${cells.buys.b65}</td>` : ''}<td id="cell-b70-${stock.id}" class="p-2 text-center text-red-600 font-semibold">${cells.buys.b70}</td><td id="cell-s25-${stock.id}" class="p-2 text-center text-blue-500 font-semibold">${cells.sells.p25}</td><td id="cell-s33-${stock.id}" class="p-2 text-center text-blue-500 font-semibold">${cells.sells.p33}</td><td id="cell-s50-${stock.id}" class="p-2 text-center text-blue-500 font-semibold">${cells.sells.p50}</td><td id="cell-s75-${stock.id}" class="p-2 text-center text-blue-500 font-semibold">${cells.sells.p75}</td><td class="p-2 text-center"><button class="delete-btn" onclick="deleteStock(${stock.id}, event)">삭제</button></td></tr>`; }).join('')}</tbody></table></div>`;
+        }
+
+        function searchStockInList() { const query = document.getElementById('searchQuery').value.trim(); if(!query) return; const targetStock = stockDatabase.find(s => s.name === query || s.code === query); document.querySelectorAll('tr.search-highlight').forEach(tr => tr.classList.remove('search-highlight')); if(targetStock) { const row = document.getElementById(`row-${targetStock.id}`); if(row) { row.scrollIntoView({ behavior: 'smooth', block: 'center' }); row.classList.add('search-highlight'); } } else { alert("해당 종목이 없습니다."); } }
+        function loadStockById(id) { if (draggedId !== null) return; const row = document.getElementById(`row-${id}`); if(row) row.classList.remove('search-highlight'); currentSelectedId = id; const s = stockDatabase.find(x => x.id === id); if (s) { document.getElementById('chartType').value = s.chartType || 'minute'; document.getElementById('stockName').value = s.name || ''; document.getElementById('stockCode').value = s.code || ''; document.getElementById('highDate').value = s.highDate || ''; document.getElementById('highPrice').value = s.high ? s.high.toLocaleString('ko-KR') : ''; document.getElementById('lowPrice').value = s.low ? s.low.toLocaleString('ko-KR') : ''; document.getElementById('bouncePrice').value = (s.bounce !== null && s.bounce !== undefined) ? s.bounce.toLocaleString('ko-KR') : ''; document.getElementById('isNxt').checked = s.isNxt || false; calculate(); renderStockList(); document.getElementById('stockName').scrollIntoView({ behavior: 'smooth', block: 'center' }); } }
+        function registerAllStocks() { if (!socket || !socket.connected) return; const minuteStocks = stockDatabase.filter(s => s.code && s.chartType === 'minute').map(s => buildStockRegistration(s, 'minute')); if (minuteStocks.length > 0) socket.emit('register_stocks', { source: 'samsihwak_분봉', stocks: minuteStocks }); const dailyStocks = stockDatabase.filter(s => s.code && s.chartType === 'daily').map(s => buildStockRegistration(s, 'daily')); if (dailyStocks.length > 0) socket.emit('register_stocks', { source: 'samsihwak_일봉', stocks: dailyStocks }); }
+        function buildStockRegistration(s, chartType) { let targetPoints = []; let watchMode = 'buy'; let pointLabels = []; const dday = calculateDDay(s.highDate).days; if (s.high && s.low) { const range = s.high - s.low; if (s.bounce) { watchMode = 'sell'; const bRange = s.high - s.bounce; targetPoints = [adjustSellPrice(s.bounce+bRange*0.25).adjusted, adjustSellPrice(s.bounce+bRange*0.33).adjusted, adjustSellPrice(s.bounce+bRange*0.5).adjusted, adjustSellPrice(s.bounce+bRange*0.75).adjusted]; pointLabels = ['25%반등', '33%반등', '50%반등', '75%반등']; } else { const p40 = adjustBuyPrice(s.high-range*0.382).adjusted; const p50 = adjustBuyPrice(s.high-range*0.5).adjusted; const p60 = adjustBuyPrice(s.high-range*0.6).adjusted; const p70 = adjustBuyPrice(s.high-range*0.7).adjusted; if (chartType === 'minute' && dday >= 2) { targetPoints = [p50, p60, p70]; pointLabels = ['50%', '60%', '70%']; } else { targetPoints = [p40, p50, p60, p70]; pointLabels = ['40%', '50%', '60%', '70%']; } } } return { code: s.code, name: s.name, watch_mode: watchMode, target_points: targetPoints, point_labels: pointLabels, high: s.high, low: s.low, bounce: s.bounce }; }
+        function addNotificationRecord(title, message) { const now = new Date(); const timeStr = now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); notificationHistory.unshift({ id: Date.now(), time: timeStr, title: title, message: message }); if (notificationHistory.length > 100) notificationHistory.pop(); sessionStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(notificationHistory)); unreadCount++; updateHistoryBadge(); if (document.getElementById('historyModal').classList.contains('active')) renderHistoryList(); }
+        function updateHistoryBadge() { const b = document.getElementById('historyBadge'); if (unreadCount > 0) { b.style.display = 'inline-flex'; b.innerText = unreadCount > 99 ? '99+' : unreadCount; } else b.style.display = 'none'; }
+        function openHistoryModal() { document.getElementById('historyModal').classList.add('active'); renderHistoryList(); unreadCount = 0; updateHistoryBadge(); }
+        function closeHistoryModal() { document.getElementById('historyModal').classList.remove('active'); }
+        function clearHistory() { if(confirm('기록 삭제?')){notificationHistory=[];sessionStorage.removeItem(HISTORY_STORAGE_KEY);renderHistoryList();unreadCount=0;updateHistoryBadge();} }
+        function renderHistoryList() { const l = document.getElementById('historyList'); if(notificationHistory.length===0){l.innerHTML='<div class="text-center text-gray-400 py-10">알림 없음</div>';return;} l.innerHTML = notificationHistory.map(i=>`<div class="history-item"><div class="h-time">${i.time}</div><div class="h-content"><div class="h-title">${i.title}</div><div class="h-msg">${i.message}</div></div></div>`).join(''); }
+        function playAlertSound() { if(!soundAlertEnabled)return; if(!audioContext)audioContext=new(window.AudioContext||window.webkitAudioContext)(); const o=audioContext.createOscillator(); const g=audioContext.createGain(); o.connect(g); g.connect(audioContext.destination); o.start(); o.stop(audioContext.currentTime+0.2); }
+        function playSellAlertSound() { playAlertSound(); } 
+        function showAlertToast(msg, type, mode) { const t = document.createElement('div'); t.className='alert-toast'; t.style.background=mode==='sell'?'#3b82f6':'#f59e0b'; t.innerHTML=`<b>${mode==='sell'?'매도':'매수'} ${type==='reached'?'도달':'근접'}</b><br>${msg}`; document.body.appendChild(t); if(soundAlertEnabled) playAlertSound(); setTimeout(()=>t.remove(), 3000); }
+        function openAlertSettings() { document.getElementById('alertModal').classList.add('active'); }
+        function closeAlertSettings() { document.getElementById('alertModal').classList.remove('active'); }
+        function saveAlertSettings() { soundAlertEnabled=document.getElementById('soundAlertToggle').checked; closeAlertSettings(); }
+        function updateAPIStatus(s, t) { document.getElementById('apiStatus').className=`api-status ${s}`; document.getElementById('apiStatusText').innerText=t; }
+        function handleDragStart(e, id) { draggedId = id; e.target.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; }
+        function handleDragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; return false; }
+        function handleDrop(e, targetId) { e.preventDefault(); if (draggedId===null||draggedId===targetId) return; const f=stockDatabase.findIndex(s=>s.id===draggedId); const t=stockDatabase.findIndex(s=>s.id===targetId); if(f>-1&&t>-1){ stockDatabase.splice(t,0,stockDatabase.splice(f,1)[0]); localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase)); renderStockList(); } }
+        function handleDragEnd(e) { e.target.classList.remove('dragging'); draggedId=null; }
+        function deleteStock(id, e) { e.stopPropagation(); if(confirm('삭제?')){ stockDatabase=stockDatabase.filter(s=>s.id!==id); localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase)); renderStockList(); registerAllStocks(); } }
+        function calculate() { 
+             const high = getNumericValue('highPrice'); const low = getNumericValue('lowPrice'); const bounce = getNumericValue('bouncePrice');
+            if (high === null || low === null || high <= low) { return; }
+            const diff = high - low; const buy40 = adjustBuyPrice(high - (diff * 0.382)); const buy50 = adjustBuyPrice(high - (diff * 0.5)); const buy60 = adjustBuyPrice(high - (diff * 0.6)); const buy70 = adjustBuyPrice(high - (diff * 0.7));
+            document.getElementById('buyPoints').innerHTML = `<div class="buy-box buy-40"><div class="flex justify-between items-center"><div><div class="font-bold text-lg">40% 매수 <span class="text-sm text-gray-600">38.2%</span></div><div class="text-xs text-gray-500 mt-1">≈ 매수가</div></div><div class="text-2xl font-bold text-pink-600">${formatPriceWithOriginal(buy40.adjusted, buy40.original)}</div></div></div><div class="buy-box buy-50"><div class="flex justify-between items-center"><div><div class="font-bold text-lg">50% 매수</div><div class="text-xs text-gray-500 mt-1">≈ 매수가</div></div><div class="text-2xl font-bold text-blue-600">${formatPriceWithOriginal(buy50.adjusted, buy50.original)}</div></div></div><div class="buy-box buy-60"><div class="flex justify-between items-center"><div><div class="font-bold text-lg">60% 매수</div><div class="text-xs text-gray-500 mt-1">≈ 매수가</div></div><div class="text-2xl font-bold text-yellow-600">${formatPriceWithOriginal(buy60.adjusted, buy60.original)}</div></div></div><div class="buy-box buy-70"><div class="flex justify-between items-center"><div><div class="font-bold text-lg">70% 매수</div><div class="text-xs text-gray-500 mt-1">≈ 매수가</div></div><div class="text-2xl font-bold text-red-600">${formatPriceWithOriginal(buy70.adjusted, buy70.original)}</div></div></div>`;
+            if (bounce !== null && bounce < high) {
+                const bounceRange = high - bounce; const sell25 = adjustSellPrice(bounce + (bounceRange * 0.25)); const sell33 = adjustSellPrice(bounce + (bounceRange * 0.33)); const sell50 = adjustSellPrice(bounce + (bounceRange * 0.50)); const sell75 = adjustSellPrice(bounce + (bounceRange * 0.75)); const riseRate4050 = (((buy40.adjusted - buy50.adjusted) / buy50.adjusted) * 100).toFixed(2);
+                document.getElementById('sellTitle').innerHTML = `💰 매도 타점 <span class="text-base font-normal text-gray-600">(40-50 상승률: ${riseRate4050}%)</span>`;
+                document.getElementById('sellPoints').innerHTML = `<div class="space-y-3"><div class="bg-green-50 p-4 rounded-lg border-2 border-green-300"><div class="flex justify-between items-center"><div class="font-bold">25% 반등</div><div class="text-xl font-bold text-green-600">${formatPriceWithOriginal(sell25.adjusted, sell25.original)}</div></div></div><div class="bg-green-50 p-4 rounded-lg border-2 border-green-300"><div class="flex justify-between items-center"><div class="font-bold">33% 반등</div><div class="text-xl font-bold text-green-600">${formatPriceWithOriginal(sell33.adjusted, sell33.original)}</div></div></div><div class="bg-green-50 p-4 rounded-lg border-2 border-green-300"><div class="flex justify-between items-center"><div class="font-bold">50% 반등</div><div class="text-xl font-bold text-green-600">${formatPriceWithOriginal(sell50.adjusted, sell50.original)}</div></div></div><div class="bg-green-50 p-4 rounded-lg border-2 border-green-300"><div class="flex justify-between items-center"><div class="font-bold">75% 반등</div><div class="text-xl font-bold text-green-600">${formatPriceWithOriginal(sell75.adjusted, sell75.original)}</div></div></div></div>`;
+            } else { document.getElementById('sellTitle').textContent = '💰 매도 타점'; document.getElementById('sellPoints').innerHTML = `<div class="text-center text-gray-500 py-8">반등저점을 입력하면<br>매도 타점이 표시됩니다</div>`; }
+        }
+        function resetInputs() { document.querySelectorAll('input').forEach(i=>i.value=''); document.getElementById('isNxt').checked = false; renderStockList(); }
+        function addToList() {
+            const chartType = document.getElementById('chartType').value; const stockName = document.getElementById('stockName').value; const stockCode = document.getElementById('stockCode').value; const highDate = document.getElementById('highDate').value; const high = getNumericValue('highPrice'); const low = getNumericValue('lowPrice'); const bounce = getNumericValue('bouncePrice'); const isNxt = document.getElementById('isNxt').checked;
+            if (!stockName || high === null || low === null) { alert('종목명, 고점, 저점을 입력해주세요!'); return; }
+            const uniqueId = Date.now(); const stockData = { id: uniqueId, chartType, name: stockName, code: stockCode || '', highDate: highDate || '', high, low, bounce, isNxt, timestamp: new Date().toISOString(), currentPrice: null, changeRate: null, reachedHistory: { reached40: false, reached45: false, reached50: false, reached55: false, reached60: false, reached65: false, reached70: false, reachedSell25: false, reachedSell33: false, reachedSell50: false, reachedSell75: false } };
+            const existingIndex = stockDatabase.findIndex(stock => stock.name === stockName && stock.chartType === chartType);
+            if (existingIndex !== -1) { stockData.id = stockDatabase[existingIndex].id; stockDatabase[existingIndex] = stockData; alert(`"${stockName}" 업데이트됨!`); } else { stockDatabase.unshift(stockData); alert(`"${stockName}" 추가됨!`); }
+            localStorage.setItem('samsihwakExtendedStocks', JSON.stringify(stockDatabase)); renderStockList(); registerAllStocks();
+            if (socket && socket.connected) { const diff = high - low; const targets = {}; targets.reached40 = adjustBuyPrice(high - (diff * 0.382)).adjusted; if(chartType === 'daily') targets.reached45 = adjustBuyPrice(high - (diff * 0.45)).adjusted; targets.reached50 = adjustBuyPrice(high - (diff * 0.5)).adjusted; if(chartType === 'daily') targets.reached55 = adjustBuyPrice(high - (diff * 0.55)).adjusted; targets.reached60 = adjustBuyPrice(high - (diff * 0.6)).adjusted; if(chartType === 'daily') targets.reached65 = adjustBuyPrice(high - (diff * 0.65)).adjusted; targets.reached70 = adjustBuyPrice(high - (diff * 0.7)).adjusted; socket.emit('check_past_reach', { id: uniqueId, code: stockCode, highDate: highDate, chartType: chartType, targets: targets, name: stockName }); }
+        }
+
+        // [수정 3] window.onload에서 수동 호출 제거 및 순서 정리
+        window.onload = function() { 
+            renderStockList(); 
+            initSocketConnection(); 
+            updateHistoryBadge(); 
+        };
+    </script>
+    <div id="alertModal" class="alert-modal"><div class="alert-modal-content"><h2 class="text-xl font-bold mb-4\">설정</h2><label class="flex items-center gap-2"><input type="checkbox" id="soundAlertToggle" checked> 소리 켜기</label><button onclick="saveAlertSettings()" class="mt-4 bg-blue-500 text-white p-2 rounded">저장</button></div></div>
+    <div id="historyModal" class="alert-modal"><div class="alert-modal-content"><div class="flex justify-between mb-2"><h2>알림 내역</h2><button onclick="closeHistoryModal()">X</button></div><div id="historyList" class="history-list-container"></div><button onclick="clearHistory()" class="mt-2 bg-gray-200 p-2 rounded w-full">지우기</button></div></div>
+    
+    <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
+    <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
+</body>
+</html>
